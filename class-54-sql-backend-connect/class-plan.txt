@@ -1,0 +1,10 @@
+connecting sql with backend.
+Using query and modifyable 
+Then explain the fact that writing custom queries is bad because syntax because based on different databases.
+orn tool : writing basic things
+jpa hibernate
+basic things which are available.
+basic queries 
+custom queries
+ddl hints to view the queries.
+connect to multiple databases through one backend.
