@@ -42,14 +42,14 @@ public interface TodoRepository extends JpaRepository<Todo, Long> {
 
     boolean existsByTitle(String title);                                    // true / false
 
-    @Query(value = "SELECT * FROM todos WHERE completed = false", nativeQuery = true)
+    @Query(value = "SELECT * FROM my_todo WHERE completed = false", nativeQuery = true)
     List<Todo> getPendingTodos();
 
-    @Query(value = "SELECT * FROM todos WHERE priority >= :priority ORDER BY priority DESC", nativeQuery = true)
+    @Query(value = "SELECT * FROM my_todo WHERE priority >= :priority ORDER BY priority DESC", nativeQuery = true)
     List<Todo> getHighPriorityTodos(@Param("priority") int priority);
 
     @Modifying
     @Transactional
-    @Query(value = "UPDATE todos SET completed = true WHERE id = :id", nativeQuery = true)
+    @Query(value = "UPDATE my_todo SET completed = true WHERE id = :id", nativeQuery = true)
     int markCompleted(@Param("id") Long id);
 }

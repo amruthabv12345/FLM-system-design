@@ -29,13 +29,13 @@ Demo project: todo/ (Todo app)   |   Postman: postman/Todo-API.postman_collectio
    - Layers: TodoController -> TodoService -> TodoRepository
 
 6. @Query: plain MySQL, same as in Workbench (nativeQuery = true)
-   - getPendingTodos:      SELECT * FROM <table> WHERE completed = false
-   - getHighPriorityTodos: SELECT * FROM <table> WHERE priority >= :priority ORDER BY priority DESC
+   - getPendingTodos:      SELECT * FROM my_todo WHERE completed = false
+   - getHighPriorityTodos: SELECT * FROM my_todo WHERE priority >= :priority ORDER BY priority DESC
    - Named params :priority + @Param("priority")
    - With @Query the method name doesn't matter (Spring doesn't parse it)
 
 7. Writing with @Query
-   - markCompleted: UPDATE <table> SET completed = true WHERE id = :id
+   - markCompleted: UPDATE my_todo SET completed = true WHERE id = :id
    - @Modifying + @Transactional, returns rows affected (0 if id not found)
    - Demo: leave off @Transactional -> error
    - Inserts: use save() (shown next)
