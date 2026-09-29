@@ -1,10 +1,88 @@
-connecting sql with backend.
-Using query and modifyable 
-Then explain the fact that writing custom queries is bad because syntax because based on different databases.
-orn tool : writing basic things
-jpa hibernate
-basic things which are available.
-basic queries 
-custom queries
-ddl hints to view the queries.
-connect to multiple databases through one backend.
+Class 54: Connecting Spring Boot to SQL
+Demo project: todo/ (Todo app)   |   Postman: postman/Todo-API.postman_collection.json
+
+1. Project setup (start.spring.io, see spring-dependencies.png)
+   - Maven, Java, Spring Boot 4.1.1
+   - Dependencies: Spring Web, Spring Data JPA, MySQL Driver, Lombok
+   - application.properties:
+       spring.datasource.url=jdbc:mysql://localhost:3306/todo_db
+       spring.datasource.username / password
+       server.port=9000
+   - Run CREATE DATABASE todo_db; in Workbench first (Hibernate creates tables, not the database)
+
+2. Seeing the SQL
+   - spring.jpa.show-sql=true
+   - spring.jpa.properties.hibernate.format_sql=true
+
+3. ORM, JPA, Hibernate
+   - ORM: maps Java objects <-> database rows
+   - JPA = the spec (rules), Hibernate = the implementation Spring Boot uses
+
+4. Entity + ddl-auto
+   - Todo: @Entity, @Table(name = "my_todo"), @Id (no @GeneratedValue -> client sends the id)
+   - Fields: id, title, completed, priority
+   - Lombok: @Getter @Setter @NoArgsConstructor (JPA needs the no-args constructor)
+   - spring.jpa.hibernate.ddl-auto=update -> Hibernate creates the table (CREATE TABLE visible in logs)
+
+5. Repository
+   - TodoRepository extends JpaRepository<Todo, Long>  (entity, id type)
+   - Layers: TodoController -> TodoService -> TodoRepository
+
+6. @Query: plain MySQL, same as in Workbench (nativeQuery = true)
+   - getPendingTodos:      SELECT * FROM <table> WHERE completed = false
+   - getHighPriorityTodos: SELECT * FROM <table> WHERE priority >= :priority ORDER BY priority DESC
+   - Named params :priority + @Param("priority")
+   - With @Query the method name doesn't matter (Spring doesn't parse it)
+
+7. Writing with @Query
+   - markCompleted: UPDATE <table> SET completed = true WHERE id = :id
+   - @Modifying + @Transactional, returns rows affected (0 if id not found)
+   - Demo: leave off @Transactional -> error
+   - Inserts: use save() (shown next)
+
+8. Why native queries are risky
+   - Native SQL uses real table/column names and MySQL syntax -> tied to one database
+   - Demo: rename the table in @Table -> derived methods still work, native queries break
+   - Console: native SQL shows up exactly as written
+   - Lead-in: what if you didn't have to write queries at all?
+
+9. Built-in JpaRepository methods
+   - Hierarchy: Repository -> CrudRepository -> PagingAndSortingRepository -> JpaRepository
+   - Used in the app: findAll (GET), save (POST + PUT), deleteById (DELETE)
+   - save = insert AND update: console shows SELECT then INSERT / UPDATE (manual id)
+   - Others to mention: findById (returns Optional), existsById, count, findAll(Sort), findAll(Pageable)
+
+10. Derived methods
+    - find/count/exists + By + field + keyword + And/Or + OrderBy
+    - In the app:
+        findByTitle, findByTitleContaining, findByTitleStartingWith,
+        findByCompleted, findByPriorityGreaterThan, findByPriorityBetween,
+        findByCompletedAndPriority, findByCompletedOrderByPriorityDesc,
+        countByCompleted, existsByTitle
+    - Field names = Java fields, not columns
+
+11. How derived methods work internally (Spring Data JPA 4.1.1)
+    - Startup (not compile time):
+        Spring creates a proxy class for TodoRepository
+        Built-in methods -> SimpleJpaRepository
+        Derived methods -> PartTreeJpaQuery -> new PartTree(methodName, Todo.class)
+          = name is parsed + validated only
+        Lookup order: @Query first, else parse the name
+    - First call of a derived method:
+        JpaQueryCreator turns the parsed tree into a JPQL string -> cached
+    - Every call:
+        cached JPQL -> bind values -> Hibernate converts JPQL to MySQL SQL -> JDBC fires it
+    - Breakpoints:
+        PartTree constructor (spring-data-commons)  -> hits at STARTUP, once per derived method
+          condition: domainClass.getSimpleName().equals("Todo")
+        JpaQueryCreator.toPredicate(Part)            -> hits on FIRST CALL, once per condition
+        JpaQueryCreator.complete(Predicate, Sort)    -> step to return: the JPQL string
+        Call the same API again -> no hit (cached)
+        (Click "Download Sources" in IntelliJ for both jars)
+    - @Query methods never hit PartTree
+    - PartTree line 28: PREFIX_TEMPLATE regex (find|read|get|query|search|stream|count|exists|delete|remove)
+    - Demo: findByPhone (no such field) -> app fails at startup
+
+12. Multiple databases (concept only, no code)
+    - Database per service, read replicas, sharding
+    - Spring Boot: separate connection + Hibernate setup per database; boilerplate, not design

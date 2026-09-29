@@ -1,0 +1,621 @@
+{
+  "info": {
+    "_postman_id": "af4213ee-9b6e-462f-ac88-30049f386e6b",
+    "name": "Todo API (Class 54)",
+    "description": "Spring Boot + MySQL todo app. Variables are in the collection's Variables tab. Run 'Sample data' once to fill the table, then try the other folders and watch the SQL in the app console (show-sql is on).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9000"
+    },
+    {
+      "key": "todoId",
+      "value": "1"
+    },
+    {
+      "key": "title",
+      "value": "Buy milk"
+    },
+    {
+      "key": "searchText",
+      "value": "milk"
+    },
+    {
+      "key": "prefix",
+      "value": "Buy"
+    },
+    {
+      "key": "completed",
+      "value": "false"
+    },
+    {
+      "key": "priority",
+      "value": "2"
+    },
+    {
+      "key": "minPriority",
+      "value": "1"
+    },
+    {
+      "key": "maxPriority",
+      "value": "3"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Sample data",
+      "description": "Adds a few todos so the queries return something. POST needs an id because the entity has no @GeneratedValue.",
+      "item": [
+        {
+          "name": "Add 'Buy milk'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/todos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 2,\n  \"title\": \"Buy milk\",\n  \"completed\": false,\n  \"priority\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add 'Buy groceries'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/todos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 3,\n  \"title\": \"Buy groceries\",\n  \"completed\": false,\n  \"priority\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add 'Pay rent'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/todos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 4,\n  \"title\": \"Pay rent\",\n  \"completed\": true,\n  \"priority\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add 'Read a book'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/todos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 5,\n  \"title\": \"Read a book\",\n  \"completed\": false,\n  \"priority\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Main APIs (built-in methods)",
+      "item": [
+        {
+          "name": "Get all todos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos"
+              ]
+            },
+            "description": "findAll()"
+          },
+          "response": []
+        },
+        {
+          "name": "Add todo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/todos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos"
+              ]
+            },
+            "description": "save(): SELECT then INSERT (manual id)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{todoId}},\n  \"title\": \"{{title}}\",\n  \"completed\": {{completed}},\n  \"priority\": {{priority}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update todo",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/todos/{{todoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "{{todoId}}"
+              ]
+            },
+            "description": "save(): SELECT then UPDATE, same method as POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{todoId}},\n  \"title\": \"{{title}}\",\n  \"completed\": {{completed}},\n  \"priority\": {{priority}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete todo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/{{todoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "{{todoId}}"
+              ]
+            },
+            "description": "deleteById()"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. @Query (native MySQL)",
+      "item": [
+        {
+          "name": "Pending todos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "pending"
+              ]
+            },
+            "description": "SELECT * FROM todos WHERE completed = false"
+          },
+          "response": []
+        },
+        {
+          "name": "High priority todos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/high-priority?priority={{priority}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "high-priority"
+              ],
+              "query": [
+                {
+                  "key": "priority",
+                  "value": "{{priority}}"
+                }
+              ]
+            },
+            "description": "SELECT * FROM todos WHERE priority >= :priority ORDER BY priority DESC"
+          },
+          "response": []
+        },
+        {
+          "name": "Mark completed",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/{{todoId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "{{todoId}}",
+                "complete"
+              ]
+            },
+            "description": "@Modifying UPDATE, returns rows affected (0 if id not found)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Derived methods",
+      "item": [
+        {
+          "name": "findByTitle",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/by-title?title={{title}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "by-title"
+              ],
+              "query": [
+                {
+                  "key": "title",
+                  "value": "{{title}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByTitleContaining",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/contains?text={{searchText}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "contains"
+              ],
+              "query": [
+                {
+                  "key": "text",
+                  "value": "{{searchText}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByTitleStartingWith",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/starts-with?prefix={{prefix}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "starts-with"
+              ],
+              "query": [
+                {
+                  "key": "prefix",
+                  "value": "{{prefix}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByCompleted",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/completed?completed={{completed}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "completed"
+              ],
+              "query": [
+                {
+                  "key": "completed",
+                  "value": "{{completed}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByPriorityGreaterThan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/priority-above?priority={{priority}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "priority-above"
+              ],
+              "query": [
+                {
+                  "key": "priority",
+                  "value": "{{priority}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByPriorityBetween",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/priority-between?min={{minPriority}}&max={{maxPriority}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "priority-between"
+              ],
+              "query": [
+                {
+                  "key": "min",
+                  "value": "{{minPriority}}"
+                },
+                {
+                  "key": "max",
+                  "value": "{{maxPriority}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByCompletedAndPriority",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/filter?completed={{completed}}&priority={{priority}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "filter"
+              ],
+              "query": [
+                {
+                  "key": "completed",
+                  "value": "{{completed}}"
+                },
+                {
+                  "key": "priority",
+                  "value": "{{priority}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "findByCompletedOrderByPriorityDesc",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/sorted?completed={{completed}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "sorted"
+              ],
+              "query": [
+                {
+                  "key": "completed",
+                  "value": "{{completed}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "countByCompleted",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/count?completed={{completed}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "count"
+              ],
+              "query": [
+                {
+                  "key": "completed",
+                  "value": "{{completed}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "existsByTitle",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/todos/exists?title={{title}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "todos",
+                "exists"
+              ],
+              "query": [
+                {
+                  "key": "title",
+                  "value": "{{title}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
