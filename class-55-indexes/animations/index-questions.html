@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Index Design Questions</title>
+<link rel="stylesheet" href="btree.css">
+<style>
+.intro { color: var(--muted); margin: 0 0 12px; }
+.jump { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.jump a { font-size: 13px; color: var(--ink); text-decoration: none; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); }
+.jump a:hover { border-color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; scroll-margin-top: 12px; }
+.qhead { display: flex; gap: 14px; align-items: flex-start; }
+.qn { flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: var(--bg); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.tag { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.card h2 { margin: 2px 0 0; font-size: 20px; font-weight: 600; }
+.scen { font-size: 16px; margin: 12px 0 8px; }
+.sql { font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 0 0 10px; white-space: pre-wrap; }
+.ask { font-weight: 600; margin: 0 0 10px; }
+.ans { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 14px; }
+.verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+.verdict code { font-size: 16px; background: var(--top); color: var(--top-ink); border: 1px solid var(--top-b); padding: 4px 10px; }
+.ans ul { margin: 6px 0 12px; padding-left: 20px; }
+.ans li { margin: 4px 0; }
+.vizbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.vizbar .hint { font-size: 13px; color: var(--muted); }
+.viz { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.viz.one { grid-template-columns: 1fr; }
+@media (max-width: 900px) { .viz { grid-template-columns: 1fr; } }
+.strip { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--soft); }
+.strip-h b { font-size: 15px; }
+.strip-h span { display: block; font-size: 13px; color: var(--muted); }
+.strip.bad .strip-h b { color: var(--chk); }
+.strip.good .strip-h b { color: var(--visit); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.chip { padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 2px solid var(--line); font-size: 14px; font-weight: 600; white-space: nowrap; transition: all .3s; }
+.chip.skip { opacity: .28; }
+.chip.read { background: var(--chk-bg); border-color: var(--chk); }
+.chip.hit { background: var(--good-bg); border-color: var(--good); }
+.chip.bad { background: var(--bad-bg); border-color: var(--bad); }
+.chip.hidden { display: none; }
+.strip-f { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.note { font-size: 14px; min-height: 21px; }
+.leaves { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; min-height: 52px; }
+.lf { display: flex; gap: 3px; padding: 6px; border: 2px solid var(--leaf-b); border-radius: 7px; background: var(--panel); transition: all .3s; }
+.lf i { width: 12px; height: 26px; border-radius: 3px; background: var(--cell); }
+.lf i.on { background: var(--muted); }
+.lf.hit { border-color: var(--good); background: var(--good-bg); }
+.lf.new { border-color: var(--new); }
+.trees { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.tr { padding: 8px 12px; border-radius: 8px; border: 2px solid var(--sec-b); background: var(--sec); color: var(--sec-ink); font-weight: 600; font-size: 13px; transition: all .3s; }
+.tr.pk { border-color: var(--top-b); background: var(--top); color: var(--top-ink); }
+.tr.hit { box-shadow: 0 0 0 3px var(--chk); }
+.meter { height: 12px; border-radius: 6px; background: var(--cell); overflow: hidden; margin: 6px 0; }
+.meter div { height: 100%; background: var(--visit); transition: width .4s; }
+.nsel { display: flex; gap: 4px; flex-wrap: wrap; }
+.nsel button { padding: 4px 10px; }
+.nsel button.on { background: var(--ink); color: var(--bg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Index design questions</h1>
+    <nav class="pages">
+      <a href="bplus-tree.html">Primary key index</a>
+      <a href="secondary-index.html">Secondary index</a>
+      <a href="multi-index.html">Multiple indexes</a>
+      <a class="on" href="index-questions.html">Design questions</a>
+    </nav>
+  </header>
+  <p class="intro">Classic system design questions where the answer is "the right index". Read the scenario, think, then reveal the answer and play the picture.</p>
+  <div class="jump" id="jump"></div>
+  <div id="cards"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
+const set = (idx, cls) => Object.fromEntries(idx.map(i => [i, cls]));
+
+// ---------- widget: a row of index entries that light up step by step ----------
+function strip(host, o) {
+  const el = document.createElement('div');
+  el.className = 'strip ' + (o.kind || '');
+  host.appendChild(el);
+  el.innerHTML = `<div class="strip-h"><b>${o.title}</b><span>${o.sub || ''}</span></div>
+    <div class="chips">${o.entries.map((e, i) => `<span class="chip" data-i="${i}">${e}</span>`).join('')}</div>
+    <div class="strip-f"><span class="note"></span><span class="pill">${o.count}: <b class="cnt">0</b></span></div>`;
+  const chips = [...el.querySelectorAll('.chip')];
+  let state = {};
+  const paint = () => chips.forEach((c, i) => {
+    const hidden = (o.hidden || []).includes(i) && !state[i];
+    c.className = 'chip' + (hidden ? ' hidden' : state[i] ? ' ' + state[i] : '');
+  });
+  return {
+    steps: () => o.steps.length,
+    reset() { state = {}; paint(); el.querySelector('.note').textContent = ''; el.querySelector('.cnt').textContent = '0'; },
+    step(k) {
+      const s = o.steps[k];
+      if (!s) return;
+      Object.assign(state, s.set || {});
+      paint();
+      if (s.note !== undefined) el.querySelector('.note').textContent = s.note;
+      if (s.count !== undefined) el.querySelector('.cnt').textContent = s.count;
+    }
+  };
+}
+
+// ---------- widget: one INSERT has to update every index tree ----------
+function writesWidget(host) {
+  const el = document.createElement('div');
+  el.className = 'strip';
+  host.appendChild(el);
+  const cols = ['user_id', 'page', 'device', 'country', 'referrer', 'created_at'];
+  let n = 6;
+  el.innerHTML = `<div class="strip-h"><b>One INSERT into clicks</b><span>How many indexes on the table?</span></div>
+    <div class="nsel" style="margin-top: 8px">${[0, 1, 2, 4, 6].map(v => `<button data-n="${v}">${v}</button>`).join('')}</div>
+    <div class="trees"></div>
+    <div class="note"></div>
+    <div class="meter"><div></div></div>
+    <div class="strip-f"><span class="note cap"></span><span class="pill">Trees written per insert: <b class="cnt">0</b></span></div>`;
+  const draw = () => {
+    el.querySelectorAll('.nsel button').forEach(b => b.classList.toggle('on', +b.dataset.n === n));
+    el.querySelector('.trees').innerHTML = '<span class="tr pk">table (primary key)</span>' + cols.slice(0, n).map(c => `<span class="tr">idx_${c}</span>`).join('');
+    el.querySelector('.meter div').style.width = Math.round(100 / (n + 1)) + '%';
+    el.querySelector('.cap').textContent = `Max inserts per second: about ${Math.round(100 / (n + 1))}% of a table with no extra indexes (rough idea)`;
+  };
+  el.querySelectorAll('.nsel button').forEach(b => b.onclick = () => { n = +b.dataset.n; draw(); w.reset(); });
+  const w = {
+    steps: () => n + 2,
+    reset() { draw(); el.querySelector('.cnt').textContent = '0'; el.querySelector('.note').textContent = ''; },
+    step(k) {
+      const trees = [...el.querySelectorAll('.tr')];
+      if (k <= n) {
+        trees.forEach((t, i) => t.classList.toggle('hit', i <= k));
+        el.querySelector('.cnt').textContent = k + 1;
+        el.querySelector('.note').textContent = k === 0 ? 'Write the row into the table...' : `...and update ${trees[k].textContent}`;
+      } else {
+        el.querySelector('.note').textContent = `1 INSERT = ${n + 1} tree write${n ? 's' : ''}. At 50,000 inserts/sec that is ${(50000 * (n + 1)).toLocaleString()} tree writes/sec.`;
+      }
+    }
+  };
+  draw();
+  return w;
+}
+
+// ---------- widget: where do new primary keys land in the leaves? ----------
+function keysWidget(host, o) {
+  const el = document.createElement('div');
+  el.className = 'strip ' + o.kind;
+  host.appendChild(el);
+  el.innerHTML = `<div class="strip-h"><b>${o.title}</b><span>${o.sub}</span></div>
+    <div class="leaves"></div>
+    <div class="strip-f"><span class="note"></span><span class="pill">Different pages written: <b class="cnt">0</b></span></div>`;
+  let leaves, touched;
+  const paint = (hit, fresh) => {
+    el.querySelector('.leaves').innerHTML = leaves.map((f, i) =>
+      `<div class="lf${i === hit ? ' hit' : ''}${i === fresh ? ' new' : ''}">${[0, 1, 2].map(d => `<i class="${d < f ? 'on' : ''}"></i>`).join('')}</div>`).join('');
+  };
+  return {
+    steps: () => o.targets.length + 1,
+    reset() { leaves = o.start.slice(); touched = new Set(); paint(-1, -1); el.querySelector('.cnt').textContent = '0'; el.querySelector('.note').textContent = ''; },
+    step(k) {
+      if (k === o.targets.length) { el.querySelector('.note').textContent = o.end; return; }
+      let t = o.targets[k] === 'last' ? leaves.length - 1 : o.targets[k];
+      let fresh = -1;
+      if (leaves[t] >= 3) {
+        if (o.targets[k] === 'last') { leaves.push(1); t = leaves.length - 1; fresh = t; }
+        else { leaves.splice(t, 1, 2, 2); fresh = t + 1; }
+      } else {
+        leaves[t]++;
+      }
+      touched.add(o.targets[k] === 'last' ? 'L' + t : k);
+      paint(t, fresh);
+      el.querySelector('.cnt').textContent = o.targets[k] === 'last' ? new Set([...touched]).size : k + 1;
+      el.querySelector('.note').textContent = fresh >= 0 ? `Insert ${o.keys[k]}: page full, split!` : `Insert ${o.keys[k]}`;
+    }
+  };
+}
+
+// ---------- the questions ----------
+const QUESTIONS = [
+  {
+    tag: 'E-commerce', title: 'Order history, newest first',
+    scen: 'An online store shows each user their latest orders on the "My orders" page. The orders table has millions of rows.',
+    sql: "SELECT * FROM orders\nWHERE user_id = 42\nORDER BY created_at DESC\nLIMIT 3;",
+    answer: 'INDEX (user_id, created_at)',
+    bullets: [
+      '<b>user_id first</b>: jump straight to one user\'s orders.',
+      '<b>created_at second</b>: inside each user, orders are already in date order, so MySQL reads the newest 3 and stops. No sorting.',
+      'Rule of thumb: columns you compare with <code>=</code> go first, then the column you sort or filter a range on.'
+    ],
+    viz: h => [
+      strip(h, { kind: 'bad', title: 'INDEX (user_id)', sub: "User 42's orders are found, but in no date order", count: 'Entries read',
+        entries: ['41 · Feb 2', '41 · Jun 9', '42 · Mar 3', '42 · Jan 9', '42 · Jun 1', '42 · Feb 2', '42 · May 7', '43 · Apr 4'],
+        steps: [
+          { set: set([0, 1, 7], 'skip'), note: 'Jump to user 42.', count: 0 },
+          { set: { 2: 'read' }, note: 'Read every order of user 42...', count: 1 },
+          { set: { 3: 'read' }, count: 2 }, { set: { 4: 'read' }, count: 3 }, { set: { 5: 'read' }, count: 4 }, { set: { 6: 'read' }, count: 5 },
+          { set: { 4: 'hit', 6: 'hit', 2: 'hit' }, note: 'Dates are mixed up: sort all 5 to find the newest 3.' }
+        ] }),
+      strip(h, { kind: 'good', title: 'INDEX (user_id, created_at)', sub: "User 42's orders are stored in date order", count: 'Entries read',
+        entries: ['41 · Feb 2', '41 · Jun 9', '42 · Jan 9', '42 · Feb 2', '42 · Mar 3', '42 · May 7', '42 · Jun 1', '43 · Apr 4'],
+        steps: [
+          { set: set([0, 1, 7], 'skip'), note: 'Jump to the end of user 42 (newest first).', count: 0 },
+          { set: { 6: 'hit' }, count: 1 }, { set: { 5: 'hit' }, count: 2 }, { set: { 4: 'hit' }, count: 3, note: 'Got the newest 3. Stop.' },
+          { set: set([2, 3], 'skip'), note: 'Already sorted: no sorting, older orders never touched.' }
+        ] })
+    ]
+  },
+  {
+    tag: 'Flash sale', title: 'Big sale: category page sorted by price',
+    scen: 'A big sale starts at midnight. Millions of users open "Electronics under ₹5000, cheapest first". This one query will run thousands of times per second.',
+    sql: "SELECT * FROM products\nWHERE category = 'Electronics' AND price < 5000\nORDER BY price;",
+    answer: 'INDEX (category, price)',
+    bullets: [
+      '<b>category first</b> (the <code>=</code> condition): jump to Electronics.',
+      '<b>price second</b>: the "under 5000" products are one continuous run, already sorted cheapest first. Read it and stop at the first price above 5000.',
+      'The other order, <code>(price, category)</code>, would mix every category by price, so MySQL would check every cheap product in the store.'
+    ],
+    viz: h => [
+      strip(h, { kind: 'bad', title: 'INDEX (category)', sub: 'Finds Electronics, but prices are in no order', count: 'Entries read',
+        entries: ['Books · ₹299', 'Books · ₹650', 'Electronics · ₹15999', 'Electronics · ₹999', 'Electronics · ₹7999', 'Electronics · ₹4999', 'Electronics · ₹2499', 'Fashion · ₹1299'],
+        steps: [
+          { set: set([0, 1, 7], 'skip'), note: 'Jump to Electronics.', count: 0 },
+          { set: { 2: 'read' }, note: 'Read every Electronics product...', count: 1 },
+          { set: { 3: 'read' }, count: 2 }, { set: { 4: 'read' }, count: 3 }, { set: { 5: 'read' }, count: 4 }, { set: { 6: 'read' }, count: 5 },
+          { set: { 3: 'hit', 5: 'hit', 6: 'hit' }, note: 'Check each price, then sort the matches.' }
+        ] }),
+      strip(h, { kind: 'good', title: 'INDEX (category, price)', sub: 'Electronics stored cheapest first', count: 'Entries read',
+        entries: ['Books · ₹299', 'Books · ₹650', 'Electronics · ₹999', 'Electronics · ₹2499', 'Electronics · ₹4999', 'Electronics · ₹7999', 'Electronics · ₹15999', 'Fashion · ₹1299'],
+        steps: [
+          { set: set([0, 1, 7], 'skip'), note: 'Jump to Electronics, cheapest first.', count: 0 },
+          { set: { 2: 'hit' }, count: 1 }, { set: { 3: 'hit' }, count: 2 }, { set: { 4: 'hit' }, count: 3 },
+          { set: { 5: 'read' }, count: 4, note: '₹7999 is over 5000: stop. Already in price order.' },
+          { set: { 6: 'skip' } }
+        ] })
+    ]
+  },
+  {
+    tag: 'Auth', title: 'Login by email, and no duplicate accounts',
+    scen: 'A users table with 10 million users. Every login looks a user up by email, and two accounts must never share an email, even if two sign-ups happen at the same moment.',
+    sql: "SELECT * FROM users WHERE email = 'zoya@mail.com';",
+    answer: 'UNIQUE INDEX (email)',
+    bullets: [
+      'One index does <b>two jobs</b>: fast login lookups (3–4 node reads even with 10 million users) and a guarantee that emails are unique.',
+      'The database enforces it, so even two sign-ups racing at the same moment cannot both succeed. Checking in application code cannot promise that.'
+    ],
+    viz: h => [
+      strip(h, { kind: 'good', title: 'UNIQUE INDEX (email)', sub: 'Emails stored in sorted order', count: 'Node reads',
+        entries: ['amit@mail.com', 'dev@mail.com', 'neha@mail.com', 'rahul@mail.com', 'zoya@mail.com', 'zoya@mail.com (new sign-up)'],
+        hidden: [5],
+        steps: [
+          { set: set([0, 1, 2, 3], 'skip'), note: 'Login: walk the tree straight to the email.', count: 3 },
+          { set: { 4: 'hit' }, note: 'Found. Check the password.' },
+          { set: { 5: 'bad' }, note: 'A new sign-up with the same email would sit right next to it...' },
+          { note: '...so the duplicate is spotted instantly and rejected.' }
+        ] })
+    ],
+    one: true
+  },
+  {
+    tag: 'Trap', title: 'Should we index is_active?',
+    scen: 'An admin page lists active users. About half of all users are active. Someone suggests adding an index on is_active.',
+    sql: "SELECT * FROM users WHERE is_active = 1;",
+    answer: 'Usually no index',
+    bullets: [
+      'A column with only 2 or 3 values matches a <b>huge part of the table</b>. Every match needs its own trip from the index to the table, so a plain scan is cheaper, and MySQL will usually ignore the index anyway.',
+      'Exception: a <b>rare</b> value. If <code>status = \'FAILED\'</code> is only 0.1% of rows, an index is great for finding those few.'
+    ],
+    viz: h => [
+      strip(h, { kind: 'bad', title: 'INDEX (is_active)', sub: '6 of 12 users match', count: 'Reads',
+        entries: ['active → 1', 'active → 3', 'active → 4', 'active → 7', 'active → 9', 'active → 11', 'inactive → 2', 'inactive → 5', 'inactive → 6', 'inactive → 8', 'inactive → 10', 'inactive → 12'],
+        steps: [
+          { set: set(range(6, 12), 'skip'), note: 'Jump to the active entries.', count: 0 },
+          { set: set(range(0, 6), 'hit'), note: '6 ids found...', count: 6 },
+          { note: '...and each needs a trip to the table (about 3 reads each).', count: 24 },
+          { note: '24 reads: worse than just scanning 12 rows.' }
+        ] }),
+      strip(h, { kind: 'good', title: 'No index: full table scan', sub: 'Read the rows in order', count: 'Rows read',
+        entries: range(1, 13).map(i => `row ${i}${[1, 3, 4, 7, 9, 11].includes(i) ? ' ✓' : ''}`),
+        steps: [
+          { set: set(range(0, 4), 'read'), note: 'Read the table start to end...', count: 4 },
+          { set: set(range(4, 8), 'read'), count: 8 },
+          { set: set(range(8, 12), 'read'), count: 12 },
+          { set: set([0, 2, 3, 6, 8, 10], 'hit'), note: '12 reads, done. Cheaper here.' }
+        ] })
+    ]
+  },
+  {
+    tag: 'Write heavy', title: 'Click tracking: index every column?',
+    scen: 'A clicks table receives 50,000 inserts per second. The analytics team wants indexes on user_id, page, device, country, referrer and created_at "to make reports fast".',
+    sql: "INSERT INTO clicks (user_id, page, device, country, referrer, created_at)\nVALUES (...);   -- 50,000 times a second",
+    answer: 'Keep indexes to the few queries that need them',
+    bullets: [
+      'Every index is another B+ tree that <b>every insert must update</b>, with its own page splits, disk space and memory.',
+      'Index only what the live product queries need, for example <code>(user_id, created_at)</code>.',
+      'Heavy reports go to a <b>separate analytics store</b> (a data warehouse), not to more indexes on the live table.'
+    ],
+    viz: h => [writesWidget(h)],
+    one: true
+  },
+  {
+    tag: 'Read heavy', title: 'Product listing: skip the table entirely',
+    scen: 'The category page shows only each product\'s name and price. It is the busiest page on the site.',
+    sql: "SELECT name, price FROM products\nWHERE category = 'Electronics';",
+    answer: 'INDEX (category, price, name), a covering index',
+    bullets: [
+      'The index itself holds <b>every column the query needs</b>, so MySQL answers from the index alone and never visits the table. <code>EXPLAIN</code> shows "Using index".',
+      'The cost: a bigger index that is slower to update. Use it for the few hottest queries only.'
+    ],
+    viz: h => [
+      strip(h, { kind: 'bad', title: 'INDEX (category)', sub: 'Index gives ids; name and price live in the table', count: 'Reads',
+        entries: ['Books → id 2', 'Electronics → id 4', 'Electronics → id 9', 'Electronics → id 12', 'Fashion → id 5'],
+        steps: [
+          { set: set([0, 4], 'skip'), note: 'Walk the index to Electronics.', count: 3 },
+          { set: set([1, 2, 3], 'hit'), note: '3 ids found.' },
+          { note: 'Trip to the table for id 4...', count: 6 },
+          { note: 'Trip to the table for id 9...', count: 9 },
+          { note: 'Trip to the table for id 12.', count: 12 }
+        ] }),
+      strip(h, { kind: 'good', title: 'INDEX (category, price, name)', sub: 'Name and price are already in the index', count: 'Reads',
+        entries: ['Books · ₹299 · Novel', 'Electronics · ₹999 · Earbuds', 'Electronics · ₹2499 · Speaker', 'Electronics · ₹7999 · Watch', 'Fashion · ₹1299 · Shirt'],
+        steps: [
+          { set: set([0, 4], 'skip'), note: 'Walk the index to Electronics.', count: 3 },
+          { set: set([1, 2, 3], 'hit'), note: 'Name and price are right here. Done, no trips to the table.' }
+        ] })
+    ]
+  },
+  {
+    tag: 'Search', title: 'Search box: products containing "phone"',
+    scen: 'The search box should find every product with "phone" anywhere in its name.',
+    sql: "SELECT * FROM products WHERE name LIKE '%phone%';",
+    answer: 'FULLTEXT INDEX (name), or a search engine',
+    bullets: [
+      'A normal index is sorted by the <b>start</b> of the value. <code>LIKE \'Phone%\'</code> can use it, but <code>\'%phone%\'</code> can be anywhere, so every row must be checked.',
+      'A <b>full-text index</b> (an inverted index) stores each <b>word → the rows that contain it</b>. Looking up "phone" is then one jump.',
+      'At scale, product search usually goes to a search engine like Elasticsearch, kept in sync with the database.'
+    ],
+    viz: h => [
+      strip(h, { kind: 'bad', title: 'INDEX (name)', sub: 'Sorted by the first letters', count: 'Names checked',
+        entries: ['Laptop bag', 'Phone case', 'Phone stand', 'Samsung phone', 'Wireless phone charger', 'Yoga mat'],
+        steps: [
+          { set: { 0: 'read' }, note: '"phone" could be anywhere in the name, so check every one...', count: 1 },
+          { set: { 1: 'hit' }, count: 2 }, { set: { 2: 'hit' }, count: 3 }, { set: { 3: 'hit' }, count: 4 }, { set: { 4: 'hit' }, count: 5 },
+          { set: { 5: 'read' }, count: 6, note: 'Checked everything. The sorted order did not help.' }
+        ] }),
+      strip(h, { kind: 'good', title: 'FULLTEXT INDEX (name)', sub: 'Each word → the rows containing it', count: 'Lookups',
+        entries: ['bag → 1', 'case → 2', 'charger → 5', 'mat → 6', 'phone → 2, 3, 4, 5', 'stand → 3'],
+        steps: [
+          { set: set([0, 1, 2, 3, 5], 'skip'), note: 'Jump to the word "phone"...', count: 1 },
+          { set: { 4: 'hit' }, note: '...and get every matching row at once.' }
+        ] })
+    ]
+  },
+  {
+    tag: 'Feeds', title: 'Infinite scroll gets slow on deep pages',
+    scen: 'A feed loads 20 posts per page. Page 1 is instant, but page 5,000 takes seconds.',
+    sql: "SELECT * FROM posts ORDER BY id DESC\nLIMIT 20 OFFSET 100000;",
+    answer: 'Keyset pagination: WHERE id < last_seen_id',
+    bullets: [
+      '<code>OFFSET</code> makes MySQL <b>read and throw away</b> every earlier row, so each page is slower than the last.',
+      'Remember the last id the user saw and ask for <code>WHERE id &lt; :last_seen_id ORDER BY id DESC LIMIT 20</code>. The primary key jumps straight there, so every page costs the same.',
+      'Trade-off: no "jump to page 5,000" button, which an infinite scroll does not need anyway.'
+    ],
+    viz: h => {
+      const ids = range(0, 12).map(i => `id ${12 - i}`);
+      return [
+        strip(h, { kind: 'bad', title: 'LIMIT 3 OFFSET 8', sub: 'Small version of a deep page', count: 'Rows read',
+          entries: ids,
+          steps: [
+            { set: set(range(0, 4), 'read'), note: 'Read and throw away...', count: 4 },
+            { set: set(range(4, 8), 'read'), note: 'Read and throw away 8 rows...', count: 8 },
+            { set: set([8, 9, 10], 'hit'), note: '...to return 3. Deep pages read everything before them.', count: 11 }
+          ] }),
+        strip(h, { kind: 'good', title: 'WHERE id < 5 LIMIT 3', sub: 'Last page ended at id 5', count: 'Rows read',
+          entries: ids,
+          steps: [
+            { set: set(range(0, 8), 'skip'), note: 'Jump straight past id 5 using the primary key.', count: 0 },
+            { set: set([8, 9, 10], 'hit'), note: 'Read just the 3 rows needed.', count: 3 }
+          ] })
+      ];
+    }
+  },
+  {
+    tag: 'Schema design', title: 'Primary key: auto-increment or random UUID?',
+    scen: 'An orders table gets thousands of inserts per second. Should the primary key be an auto-increment number or a random UUID?',
+    sql: "id BIGINT AUTO_INCREMENT PRIMARY KEY\n-- or --\nid CHAR(36) PRIMARY KEY   -- random UUID",
+    answer: 'Auto-increment, or time-ordered ids',
+    bullets: [
+      'Sequential ids always land on the <b>last leaf</b>: one hot page that stays in memory, and splits happen only at the end.',
+      'Random UUIDs land on <b>random leaves</b> all over the tree: more pages read from disk, splits everywhere, and half-empty pages.',
+      'The primary key is also copied into <b>every secondary index</b>, so a 36-character UUID makes all of them bigger than an 8-byte number.',
+      'Need ids that are unique across many servers? Use <b>time-ordered</b> ids (UUIDv7, Snowflake): unique and still sequential.'
+    ],
+    viz: h => [
+      keysWidget(h, { kind: 'good', title: 'AUTO_INCREMENT', sub: 'Leaves of the primary key tree (3 slots each)',
+        start: [3, 3, 3, 3, 3, 2], targets: ['last', 'last', 'last', 'last', 'last', 'last'], keys: [101, 102, 103, 104, 105, 106],
+        end: 'Every insert went to the rightmost page. Only a few pages ever touched.' }),
+      keysWidget(h, { kind: 'bad', title: 'Random UUID', sub: 'Leaves of the primary key tree (3 slots each)',
+        start: [3, 2, 3, 2, 3, 2], targets: [3, 0, 5, 2, 1, 4], keys: ['9f2c…', '1a7e…', 'e41b…', '5d03…', '33c8…', 'b7a1…'],
+        end: 'Every insert hit a different page, with splits in the middle of the tree.' })
+    ]
+  }
+];
+
+// ---------- render cards ----------
+$('#jump').innerHTML = QUESTIONS.map((q, i) => `<a href="#q${i + 1}">${i + 1}. ${q.title}</a>`).join('');
+$('#cards').innerHTML = QUESTIONS.map((q, i) => `
+  <article class="card" id="q${i + 1}">
+    <div class="qhead"><span class="qn">${i + 1}</span><div><div class="tag">${q.tag}</div><h2>${q.title}</h2></div></div>
+    <p class="scen">${q.scen}</p>
+    <pre class="sql">${q.sql.replace(/</g, '&lt;')}</pre>
+    <p class="ask">What index would you add?</p>
+    <button class="primary" data-reveal="${i}">Show answer</button>
+    <div class="ans" id="ans${i}" hidden>
+      <div class="verdict">Answer: <code>${q.answer}</code></div>
+      <ul>${q.bullets.map(b => `<li>${b}</li>`).join('')}</ul>
+      <div class="vizbar"><button class="primary" data-play="${i}">&#9654; Play</button><span class="hint">Watch how much work each option does.</span></div>
+      <div class="viz${q.one ? ' one' : ''}" id="viz${i}"></div>
+    </div>
+  </article>`).join('');
+
+const widgets = {}, runs = {};
+document.querySelectorAll('[data-reveal]').forEach(b => b.onclick = () => {
+  const i = +b.dataset.reveal;
+  $('#ans' + i).hidden = false;
+  b.remove();
+  widgets[i] = QUESTIONS[i].viz($('#viz' + i));
+  widgets[i].forEach(w => w.reset());
+});
+document.querySelectorAll('[data-play]').forEach(b => b.onclick = async () => {
+  const i = +b.dataset.play, run = (runs[i] || 0) + 1;
+  runs[i] = run;
+  const ws = widgets[i];
+  ws.forEach(w => w.reset());
+  b.innerHTML = '&#8635; Replay';
+  const n = Math.max(...ws.map(w => w.steps()));
+  for (let k = 0; k < n; k++) {
+    await sleep(k === 0 ? 300 : 1300);
+    if (runs[i] !== run) return;
+    ws.forEach(w => w.step(k));
+  }
+});
+</script>
+</body>
+</html>

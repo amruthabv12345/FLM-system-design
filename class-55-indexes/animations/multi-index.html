@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multiple Indexes</title>
+<link rel="stylesheet" href="btree.css">
+<style>
+.split { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+.split > .panel + .panel { border-left: 1px solid var(--line); }
+@media (max-width: 1000px) { .split { grid-template-columns: 1fr; } .split > .panel + .panel { border-left: none; border-top: 1px solid var(--line); } }
+.ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.ph b { font-size: 16px; }
+.ph span { color: var(--muted); font-size: 13px; }
+.ph .dot { width: 10px; height: 10px; border-radius: 3px; border: 2px solid; align-self: center; }
+.dot.sec { background: var(--sec); border-color: var(--sec-b); }
+.dot.pri { background: var(--top); border-color: var(--top-b); }
+.q { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.cost { padding: 12px 14px; border-top: 1px solid var(--line); }
+.cost h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cost table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cost th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.cost td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.cost td:first-child { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.cost td.good { color: var(--visit); font-weight: 600; }
+.cost td.bad { color: var(--chk); font-weight: 600; }
+.cost .none { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Multiple indexes: which one gets used?</h1>
+    <nav class="pages">
+      <a href="bplus-tree.html">Primary key index</a>
+      <a href="secondary-index.html">Secondary index</a>
+      <a class="on" href="multi-index.html">Multiple indexes</a>
+      <a href="index-questions.html">Design questions</a>
+    </nav>
+  </header>
+
+  <div class="box">
+    <div class="row" id="rowIdx">
+      <div class="row-t">Indexes</div>
+      <div class="row-c">
+        <button class="act" id="bIdxName"></button>
+        <button class="act" id="bIdxCity"></button>
+      </div>
+    </div>
+    <div class="row" id="rowQuery">
+      <div class="row-t">Query</div>
+      <div class="row-c" id="queries"></div>
+    </div>
+    <div class="row" id="rowInsert">
+      <div class="row-t">Insert</div>
+      <div class="row-c"><button class="act" id="bInsert"></button></div>
+    </div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div style="position: relative">
+      <div class="split">
+        <div class="panel">
+          <div class="ph"><span class="dot sec"></span><b>idx_name</b><span>secondary index, leaves hold name → id</span></div>
+          <div id="snTree"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="dot sec"></span><b>idx_city</b><span>secondary index, leaves hold city → id (sorted by city, then id)</span></div>
+          <div id="scTree"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><span class="dot pri"></span><b>Primary key on id (the table itself)</b><span>leaves hold full rows</span></div>
+        <div id="priTree"></div>
+      </div>
+      <div class="start" id="start">
+        <div class="start-title">Table <code>students</code> with columns id, name and city</div>
+        <div class="start-sub">The primary key is <code>id</code>. We start with 12 rows and no other indexes, then add an index on <code>name</code> and one on <code>city</code>, and see which one each query uses.</div>
+        <button id="bCreate" class="primary big">Create table with 12 rows</button>
+      </div>
+    </div>
+    <div class="cost">
+      <h3>Cost of each query</h3>
+      <div id="costBody"></div>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bReset">Reset</button>
+    </div>
+  </div>
+</div>
+
+<script src="btree-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const { clone, esc, tok, countRows, leftmost } = BT;
+const M = 3;
+
+const ROWS = [[10,'Rahul','Pune'],[20,'Priya','Delhi'],[5,'Amit','Pune'],[15,'Sneha','Mumbai'],[25,'Rohan','Delhi'],[30,'Neha','Pune'],
+              [12,'Kiran','Mumbai'],[18,'Zoya','Pune'],[27,'Arjun','Delhi'],[3,'Meera','Mumbai'],[8,'Vikram','Pune'],[22,'Anjali','Delhi']];
+const MORE = [[35,'Dev','Mumbai'],[1,'Isha','Pune'],[40,'Kabir','Delhi'],[17,'Tara','Mumbai']];
+const toRow = ([id, name, city]) => ({ key: id, name, city, sub: `${name} · ${city}` });
+// idx_city keys are (city, id), like InnoDB does, so every entry is unique even when many rows share a city.
+const entry = (row, col) => col === 'city'
+  ? { key: [row.city, row.key], label: row.city, sub: `id ${row.key}`, ref: row.key }
+  : { key: row.name, sub: `id ${row.key}`, ref: row.key };
+
+const NO_NAME = 'No index on name.<br>Searching by name = full table scan.';
+const NO_CITY = 'No index on city.<br>Searching by city = full table scan.';
+const snView = new BT.TreeView($('#snTree'), { minH: 230, maxScale: 1, rowsLabel: 'Entries', secondary: true, empty: NO_NAME });
+const scView = new BT.TreeView($('#scTree'), { minH: 230, maxScale: 1, rowsLabel: 'Entries', secondary: true, empty: NO_CITY });
+const priView = new BT.TreeView($('#priTree'), { minH: 300, maxScale: 1.1 });
+BT.setup({ views: { sn: snView, sc: scView, pri: priView } });
+
+let st;
+const allRows = () => { const out = []; let l = leftmost(st.P); while (l) { out.push(...l.rows); l = l.next ? st.P.nodes[l.next] : null; } return out; };
+const N = () => countRows(st.P);
+
+async function act(fn) {
+  if (BT.P.busy) return;
+  BT.P.busy = true; update();
+  try { await fn(); } finally { BT.P.busy = false; BT.P.turbo = false; update(); }
+}
+
+function plain() {
+  if (st.P) priView.render({ tree: clone(st.P) });
+  if (st.Sn) snView.render({ tree: clone(st.Sn) }); else snView.clear(NO_NAME);
+  if (st.Sc) scView.render({ tree: clone(st.Sc) }); else scView.clear(NO_CITY);
+}
+
+// ---------- building and dropping indexes ----------
+function* createTableGen() {
+  yield { msg: 'CREATE TABLE ran. The table itself is a B+ tree sorted by <b>id</b>. Now 12 rows go in.', views: { pri: { tree: clone(st.P), hl: { [st.P.root]: 'new' } } } };
+  for (const row of ROWS.map(toRow)) yield* BT.inView(BT.insertGen(st.P, row), 'pri', { quick: true });
+  yield { msg: 'The table has <b>12 rows</b>, and the only index is the primary key on id. Try a query on name or city first, then create the indexes.', views: { pri: { tree: clone(st.P) } } };
+}
+
+function* buildIndexGen(S, col, view) {
+  const idx = `idx_${col}`;
+  yield { msg: `<b>CREATE INDEX ${idx}</b>: MySQL reads every row of the table once and copies its <b>${col}</b> and <b>id</b> into a new B+ tree, sorted by ${col}.`,
+    views: { [view]: { tree: clone(S), hl: { [S.root]: 'new' } } } };
+  let leaf = leftmost(st.P), count = 0;
+  while (leaf) {
+    for (let i = 0; i < leaf.rows.length; i++) {
+      const r = leaf.rows[i], quick = count > 0;
+      yield { quick, msg: `Reading row <b>${r.key}, ${esc(r.sub)}</b> from the table → add <b>${esc(r[col])} → id ${r.key}</b> to ${idx}.`,
+        views: { pri: { tree: clone(st.P), hl: { [leaf.id]: 'current' }, rows: { [leaf.id + ':' + i]: 'found' } } } };
+      yield* BT.inView(BT.insertGen(S, entry(r, col)), view, { quick });
+      count++;
+    }
+    leaf = leaf.next ? st.P.nodes[leaf.next] : null;
+  }
+  yield { msg: `<b>${idx}</b> is ready: a separate tree sorted by ${col}, whose leaves hold only <b>${col} → id</b>.`, views: { [view]: { tree: clone(S) }, pri: { tree: clone(st.P) } } };
+}
+
+// ---------- queries ----------
+function* scanQuery(pred, why, what) {
+  yield* BT.inView(BT.scanGen(st.P, pred, why, what), 'pri');
+  return { how: 'no usable index → full table scan', work: `${N()} rows checked`, bad: true };
+}
+
+function* fetchRowGen(id, lead, quick) {
+  yield { quick, msg: lead, views: { pri: { tree: clone(st.P), token: tok(id, st.P.root, 'up'), hl: { [st.P.root]: 'current' } } } };
+  const b = yield* BT.inView(BT.searchGen(st.P, id, { note: false }), 'pri', quick ? { quick: true } : {});
+  return b;
+}
+
+// Walk a secondary index to the first entry equal to k, then collect every match.
+function* findAllGen(T, k, view, idx) {
+  const F = (msg, o = {}) => Object.assign({ tree: clone(T), msg }, o);
+  const hl = {}, rows = {}, refs = [];
+  let n = T.nodes[T.root], reads = 0;
+  for (;;) {
+    reads++;
+    if (n.leaf) break;
+    let i = 0;
+    while (i < n.keys.length && n.keys[i][0] < k) i++;
+    const where = i === 0 ? 'the <b>left</b> branch' : i === n.keys.length ? 'the <b>right</b> branch' : n.children.length > 3 ? `branch <b>${i + 1}</b>` : 'the <b>middle</b> branch';
+    yield F(`Read node ${reads} of ${idx}. Top node [ ${n.keys.map(BT.kt).join(' | ')} ]: the first <b>${esc(k)}</b> can only be in ${where}.`,
+      { token: tok(k, n.id), hl: Object.assign({}, hl, { [n.id]: 'current' }), stats: { reads, mode: 'index' } });
+    hl[n.id] = 'visit';
+    n = T.nodes[n.children[i]];
+  }
+  let i = 0;
+  outer:
+  for (;;) {
+    for (; i < n.rows.length; i++) {
+      const r = n.rows[i], key = n.id + ':' + i;
+      if (r.key[0] < k) continue;
+      if (r.key[0] === k) {
+        refs.push(r.ref);
+        rows[key] = 'found';
+        yield F(`<b>${esc(k)} → ${r.sub}</b>: a match. Keep the id.`,
+          { rows: Object.assign({}, rows), hl: Object.assign({}, hl, { [n.id]: 'current' }), token: tok(k, n.id), stats: { reads, mode: 'index' }, quick: refs.length > 2 });
+      } else {
+        rows[key] = 'checking';
+        yield F(`${esc(r.key[0])} comes after ${esc(k)}. The index is sorted, so there are no more ${esc(k)} entries: <b>stop</b>.`,
+          { rows: Object.assign({}, rows), hl: Object.assign({}, hl, { [n.id]: 'current' }), token: tok(k, n.id), stats: { reads, mode: 'index' } });
+        rows[key] = 'checked';
+        break outer;
+      }
+    }
+    if (!n.next) break;
+    hl[n.id] = 'visit';
+    n = T.nodes[n.next];
+    i = 0;
+    reads++;
+    yield F(`End of this leaf. More ${esc(k)} entries may follow, so follow the link to the next leaf.`,
+      { rows: Object.assign({}, rows), hl: Object.assign({}, hl, { [n.id]: 'current' }), token: tok(k, n.id), stats: { reads, mode: 'index' } });
+  }
+  yield F(`${idx} found <b>${refs.length}</b> matching id${refs.length === 1 ? '' : 's'} (${refs.join(', ')}) in <b>${reads}</b> node reads.`,
+    { rows: Object.assign({}, rows), hl, stats: { reads, mode: 'index' } });
+  return { reads, refs };
+}
+
+function* byIdGen(id) {
+  const b = yield* BT.inView(BT.searchGen(st.P, id), 'pri');
+  return { how: 'primary key', work: `${b.reads} node reads`, good: true };
+}
+
+function* byNameGen(name) {
+  if (!st.Sn) return yield* scanQuery(r => r.name === name,
+    'There is <b>no index on name</b>. The table is sorted by id, so it cannot say where a name is.', `name = '${name}'`);
+  yield { msg: `There is an index on name. <b>Step 1:</b> find ${name} in <b>idx_name</b>.`, views: {} };
+  const a = yield* BT.inView(BT.searchGen(st.Sn, name, { note: false }), 'sn');
+  if (!a.row) return { how: 'idx_name', work: `${a.reads} node reads`, good: true };
+  const b = yield* fetchRowGen(a.row.ref, `idx_name gives <b>id ${a.row.ref}</b>, not the row. <b>Step 2:</b> fetch the full row from the primary key tree.`);
+  const tot = a.reads + b.reads;
+  yield { msg: `Done: ${a.reads} + ${b.reads} = <b>${tot}</b> node reads instead of checking all <b>${N()}</b> rows. <b>This is why you create a secondary index</b>: searches on name no longer scan the whole table.`, views: {} };
+  return { how: 'idx_name → primary key', work: `${tot} node reads`, good: true };
+}
+
+function* byCityGen(city) {
+  if (!st.Sc) return yield* scanQuery(r => r.city === city,
+    'There is <b>no index on city</b>. The table is sorted by id, so it cannot say where a city is.', `city = '${city}'`);
+  yield { msg: `There is an index on city. <b>Step 1:</b> find every ${city} entry in <b>idx_city</b>.`, views: {} };
+  const a = yield* BT.inView(findAllGen(st.Sc, city, 'sc', 'idx_city'), 'sc');
+  let tot = a.reads;
+  for (let j = 0; j < a.refs.length; j++) {
+    const b = yield* fetchRowGen(a.refs[j], `<b>Step 2:</b> fetch the full row for id ${a.refs[j]} from the primary key tree (${j + 1} of ${a.refs.length}).`, j > 0);
+    tot += b.reads;
+  }
+  yield { msg: tot >= N()
+    ? `Done: <b>${tot}</b> node reads, which is <b>more work</b> than simply scanning all <b>${N()}</b> rows. ${a.refs.length} of ${N()} rows are in ${city}, and <b>each match needs its own trip</b> to the primary key tree. Real MySQL would notice this and <b>skip the index</b>, doing a full table scan instead. An index only pays off when it narrows things down to a few rows.`
+    : `Done: <b>${tot}</b> node reads for ${a.refs.length} rows, vs <b>${N()}</b> rows for a full scan. Each match needs its own trip to the primary key tree, so the more rows match, the less the index saves.`, views: {} };
+  return { how: `idx_city → primary key × ${a.refs.length}`, work: `${tot} node reads`, good: tot < N(), bad: tot >= N() };
+}
+
+function* andGen(name, city, reversed) {
+  const rows = allRows();
+  const est = { idx_name: rows.filter(r => r.name === name).length, idx_city: rows.filter(r => r.city === city).length };
+  const opts = [];
+  if (st.Sn) opts.push('idx_name');
+  if (st.Sc) opts.push('idx_city');
+  yield { msg: reversed
+    ? 'Same two conditions, written in the <b>other order</b>. The order inside WHERE does not matter: MySQL makes exactly the same plan.'
+    : 'Two conditions. MySQL looks at the indexes it has and <b>picks one</b> to start with.', views: {} };
+  if (!opts.length) return yield* scanQuery(r => r.name === name && r.city === city,
+    'Neither name nor city has an index.', `name = '${name}' AND city = '${city}'`);
+  const best = opts.length > 1 ? (est.idx_name <= est.idx_city ? 'idx_name' : 'idx_city') : opts[0];
+  const label = idx => `${est[idx]} match${est[idx] === 1 ? '' : 'es'} → ${idx === best ? 'use it' : 'skip'}`;
+  const choice = {};
+  if (st.Sn) choice.sn = { tree: clone(st.Sn), token: tok(label('idx_name'), st.Sn.root, best === 'idx_name' ? 'up' : 'bad') };
+  if (st.Sc) choice.sc = { tree: clone(st.Sc), token: tok(label('idx_city'), st.Sc.root, best === 'idx_city' ? 'up' : 'bad') };
+  yield { msg: opts.length > 1
+    ? `idx_name would match <b>${est.idx_name}</b> row${est.idx_name === 1 ? '' : 's'}, idx_city would match <b>${est.idx_city}</b>. MySQL picks <b>${best}</b>: fewer rows to fetch means less work. The other index is not used at all.`
+    : `Only <b>${best}</b> exists, so MySQL uses it.`, views: choice };
+
+  let tot = 0, found = 0;
+  if (best === 'idx_name') {
+    const a = yield* BT.inView(BT.searchGen(st.Sn, name, { note: false }), 'sn');
+    tot += a.reads;
+    if (a.row) {
+      const b = yield* fetchRowGen(a.row.ref, `idx_name gives <b>id ${a.row.ref}</b>. Fetch that row from the primary key tree.`);
+      tot += b.reads;
+      const ok = b.row && b.row.city === city;
+      if (ok) found++;
+      yield { msg: `Row ${a.row.ref} is fetched. Now check the <b>other</b> condition on it: city = '${city}'? ${ok ? '<b>Yes</b>, so it is returned.' : '<b>No</b>, so no result.'}`, views: {} };
+    }
+  } else {
+    const a = yield* BT.inView(findAllGen(st.Sc, city, 'sc', 'idx_city'), 'sc');
+    tot += a.reads;
+    for (let j = 0; j < a.refs.length; j++) {
+      const b = yield* fetchRowGen(a.refs[j], `Fetch row ${a.refs[j]} (${j + 1} of ${a.refs.length}) and check its name.`, j > 0);
+      tot += b.reads;
+      const ok = b.row && b.row.name === name;
+      if (ok) found++;
+      yield { quick: j > 0, msg: `Row ${a.refs[j]}: name is ${esc(b.row.name)}. ${ok ? '<b>Match</b>, keep it.' : 'Not ' + esc(name) + ', skip it.'}`, views: {} };
+    }
+  }
+  const other = best === 'idx_name' ? 'city' : 'name';
+  yield { msg: `Done: <b>${tot}</b> node reads, <b>${found}</b> row${found === 1 ? '' : 's'} returned. MySQL used ${best} to find candidates, then simply checked ${other} on each row it fetched.`, views: {} };
+  return { how: `${best} → primary key, then check ${other}`, work: `${tot} node reads`, good: true };
+}
+
+function* likeGen(end) {
+  const why = st.Sn
+    ? `idx_name is sorted by the <b>first letters</b> of the name. '%${end}' means "ends with ${end}", which can start with any letter, so the index cannot narrow it down.`
+    : 'There is no index on name.';
+  return yield* scanQuery(r => r.name.toLowerCase().endsWith(end), why, `name LIKE '%${end}'`);
+}
+
+function* insertGen(row) {
+  const ok = yield* BT.inView(BT.insertGen(st.P, row), 'pri');
+  if (!ok) return null;
+  let trees = 1;
+  if (st.Sn) {
+    yield { msg: 'The row is in the table. There is an index on <b>name</b>, so that tree must be updated too.', views: { pri: { tree: clone(st.P) } } };
+    yield* BT.inView(BT.insertGen(st.Sn, entry(row, 'name')), 'sn');
+    trees++;
+  }
+  if (st.Sc) {
+    yield { msg: 'There is also an index on <b>city</b>, so that tree must be updated as well.', views: {} };
+    yield* BT.inView(BT.insertGen(st.Sc, entry(row, 'city')), 'sc');
+    trees++;
+  }
+  yield { msg: trees > 1
+    ? `One INSERT updated <b>${trees} trees</b>. <b>This is the downside of indexes</b>: every extra index means more work on every INSERT, UPDATE and DELETE, plus more disk space. Only index the columns you really search by.`
+    : 'No secondary indexes, so only <b>1 tree</b> was updated. Writes are cheap, but searches on name or city are full scans.', views: {} };
+  return { how: `updated ${trees} tree${trees > 1 ? 's' : ''}`, work: `${trees} tree${trees > 1 ? 's' : ''} written`, bad: trees > 2 };
+}
+
+const QUERIES = [
+  ["WHERE id = 18", () => byIdGen(18)],
+  ["WHERE name = 'Zoya'", () => byNameGen('Zoya')],
+  ["WHERE city = 'Pune'", () => byCityGen('Pune')],
+  ["WHERE name = 'Zoya' AND city = 'Pune'", () => andGen('Zoya', 'Pune', false)],
+  ["WHERE city = 'Pune' AND name = 'Zoya'", () => andGen('Zoya', 'Pune', true)],
+  ["WHERE name LIKE '%ya'", () => likeGen('ya')]
+];
+
+// ---------- cost table ----------
+function addCost(query, c) { st.costs.push({ query, ...c }); renderCosts(); }
+function renderCosts() {
+  const cs = st ? st.costs : [];
+  $('#costBody').innerHTML = cs.length
+    ? `<table><tr><th>Query</th><th>How MySQL answered it</th><th>Work</th></tr>${cs.map(c =>
+        `<tr><td>${esc(c.query)}</td><td>${esc(c.how)}</td><td class="${c.good ? 'good' : c.bad ? 'bad' : ''}">${esc(c.work)}</td></tr>`).join('')}</table>`
+    : '<span class="none">Run a query to see how much work it took.</span>';
+}
+
+// ---------- controls ----------
+$('#queries').innerHTML = QUERIES.map(([label], i) => `<button class="act q" data-q="${i}">${esc(label)}</button>`).join('');
+document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => act(async () => {
+  const [label, gen] = QUERIES[+b.dataset.q];
+  plain();
+  const c = await BT.run(gen());
+  if (c) addCost(label, c);
+}));
+
+$('#bCreate').onclick = () => act(async () => {
+  st.P = BT.newTree(M, { keyType: 'num' });
+  update();
+  await BT.run(createTableGen());
+});
+
+function toggleIndex(col) {
+  const key = col === 'name' ? 'Sn' : 'Sc', view = col === 'name' ? 'sn' : 'sc';
+  act(async () => {
+    plain();
+    if (st[key]) {
+      st[key] = null;
+      (col === 'name' ? snView : scView).clear(col === 'name' ? NO_NAME : NO_CITY);
+      BT.say(`<b>DROP INDEX idx_${col}</b>: that tree is deleted. Inserts get a little cheaper, but searches on ${col} go back to full table scans.`);
+      return;
+    }
+    st[key] = BT.newTree(M, { keyType: col === 'city' ? 'pair' : 'str', kind: 'secondary', unique: false });
+    await BT.run(buildIndexGen(st[key], col, view));
+  });
+}
+$('#bIdxName').onclick = () => toggleIndex('name');
+$('#bIdxCity').onclick = () => toggleIndex('city');
+
+$('#bInsert').onclick = () => act(async () => {
+  plain();
+  const row = toRow(MORE[st.next++]);
+  const c = await BT.run(insertGen(row));
+  if (c) addCost(`INSERT (${row.key}, '${row.name}', '${row.city}')`, c);
+});
+
+function update() {
+  const busy = BT.P.busy, hasP = !!st.P, left = st.next < MORE.length;
+  $('#start').style.display = hasP ? 'none' : 'flex';
+  ['#rowIdx', '#rowQuery', '#rowInsert'].forEach(id => { $(id).style.display = hasP ? 'flex' : 'none'; });
+  $('#bCreate').disabled = busy;
+  document.querySelectorAll('.act, #bReset').forEach(b => { b.disabled = busy; });
+  if (!busy) $('#bInsert').disabled = !left;
+  $('#bIdxName').textContent = st.Sn ? 'DROP INDEX idx_name' : 'CREATE INDEX idx_name (name)';
+  $('#bIdxCity').textContent = st.Sc ? 'DROP INDEX idx_city' : 'CREATE INDEX idx_city (city)';
+  $('#bIdxName').classList.toggle('primary', !st.Sn);
+  $('#bIdxCity').classList.toggle('primary', !st.Sc);
+  $('#bInsert').textContent = left ? `INSERT row: ${MORE[st.next].join(', ')}` : 'Sample rows done';
+}
+
+function reset() {
+  st = { P: null, Sn: null, Sc: null, next: 0, costs: [] };
+  snView.clear(NO_NAME);
+  scView.clear(NO_CITY);
+  priView.clear('');
+  renderCosts();
+  BT.say('A students table with a primary key on id. We will add indexes on name and city and see which one each query uses.');
+  update();
+}
+$('#bReset').onclick = () => { if (!BT.P.busy) reset(); };
+
+reset();
+</script>
+</body>
+</html>

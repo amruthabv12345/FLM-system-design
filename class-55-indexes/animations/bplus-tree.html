@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Primary Key Index</title>
+<link rel="stylesheet" href="btree.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>How a primary key index works (B+ tree)</h1>
+    <nav class="pages">
+      <a class="on" href="bplus-tree.html">Primary key index</a>
+      <a href="secondary-index.html">Secondary index</a>
+      <a href="multi-index.html">Multiple indexes</a>
+      <a href="index-questions.html">Design questions</a>
+    </nav>
+  </header>
+
+  <div class="box">
+    <div class="row">
+      <div class="row-t">Key</div>
+      <div class="row-c">
+        <div class="seg" id="tabs">
+          <button data-sc="single" class="on">1 column: id</button>
+          <button data-sc="composite">2 columns: class + roll_no</button>
+        </div>
+      </div>
+    </div>
+    <div class="row" id="rowInsert"><div class="row-t">Insert</div><div class="row-c" id="insertC"></div></div>
+    <div class="row" id="rowSearch"><div class="row-t">Search</div><div class="row-c" id="searchC"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div style="position: relative">
+      <div id="tree"></div>
+      <div class="start" id="start">
+        <div class="start-title" id="stTitle"></div>
+        <div class="start-sub" id="stSub"></div>
+        <button id="bCreate" class="primary big">Create table</button>
+      </div>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <label>Max per node <select id="maxSel" autocomplete="off"><option>2</option><option selected>3</option><option>4</option></select></label>
+      <span class="hint">Real MySQL fits hundreds per node (one 16 KB page). Kept tiny here so splits happen often.</span>
+      <span class="sp"></span>
+      <button id="bReset">Reset</button>
+    </div>
+  </div>
+</div>
+
+<script src="btree-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const { kt, esc, clone, field } = BT;
+
+const SCENARIOS = {
+  single: {
+    keyType: 'num',
+    intro: 'PRIMARY KEY (id): MySQL stores the students table as a B+ tree sorted by id. Create the table, insert rows one by one, then search.',
+    start: ['Table <code>students</code> with columns id and name', 'The primary key is <code>id</code>. Create the table to see the index MySQL builds for it.'],
+    presets: [[10,'Rahul'],[20,'Priya'],[5,'Amit'],[15,'Sneha'],[25,'Rohan'],[30,'Neha'],[12,'Kiran'],[18,'Zoya'],[27,'Arjun'],[3,'Meera'],[8,'Vikram'],[22,'Anjali'],[35,'Dev'],[1,'Isha'],[40,'Kabir'],[17,'Tara'],[33,'Nikhil']]
+      .map(([id, name]) => ({ key: id, sub: name }))
+  },
+  composite: {
+    keyType: 'pair',
+    intro: 'PRIMARY KEY (class, roll_no): the tree is sorted by class first, then by roll_no inside each class, like a register sorted by class and then roll number. Keys are shown as "class · roll".',
+    start: ['Table <code>marks</code> with columns class, roll_no and name', 'The primary key is <code>(class, roll_no)</code>: two columns together. Create the table to see the index MySQL builds for it.'],
+    presets: [[9,2,'Riya'],[8,1,'Aman'],[10,3,'Kavya'],[9,1,'Farhan'],[8,3,'Sana'],[10,1,'Yash'],[9,3,'Diya'],[8,2,'Om'],[10,2,'Ira'],[9,4,'Veer'],[8,4,'Pooja'],[10,4,'Ansh']]
+      .map(([c, r, name]) => ({ key: [c, r], sub: name }))
+  }
+};
+
+const view = new BT.TreeView($('#tree'), { minH: 440 });
+BT.setup({ views: { main: view }, onFrame: f => { cur().lastFrame = f; } });
+
+let sc = 'single';
+const freshState = () => ({ tree: null, next: 0, lastFrame: null, M: +$('#maxSel').value });
+const states = { single: freshState(), composite: freshState() };
+const cur = () => states[sc];
+const SC = () => SCENARIOS[sc];
+
+const play = gen => BT.run(BT.inView(gen, 'main'));
+async function act(fn) {
+  if (BT.P.busy) return;
+  BT.P.busy = true; update();
+  try { await fn(); } finally { BT.P.busy = false; BT.P.turbo = false; update(); }
+}
+
+function* createGen(T) {
+  yield { tree: clone(T), msg: 'CREATE TABLE ran. Because of the <b>PRIMARY KEY</b>, MySQL sets up a B+ tree for this table. Right now it is just one <b>empty leaf</b>.', hl: { [T.root]: 'new' } };
+}
+
+function buildControls() {
+  const comp = SC().keyType === 'pair';
+  $('#stTitle').innerHTML = SC().start[0];
+  $('#stSub').innerHTML = SC().start[1];
+
+  $('#insertC').innerHTML = `
+    <button class="act primary" id="bNext"></button>
+    <button class="act" id="bAll">All remaining</button>
+    <span class="div"></span>
+    <span class="or">Your own:</span>
+    ${comp ? field('iA', 'class', 'number') + field('iB', 'roll', 'number') : field('iA', 'id', 'number')}
+    <button class="act" id="bIns">Insert</button>`;
+
+  $('#searchC').innerHTML = comp ? `
+    ${field('sA', 'class', 'number', 9)}${field('sB', 'roll', 'number', 3)}
+    <button class="act primary" id="bFind">Find class + roll</button>
+    <button class="act" id="bPrefix">Class only</button>
+    <button class="act" id="bRoll">Roll only</button>` : `
+    ${field('sA', 'id', 'number', 18)}
+    <button class="act primary" id="bFind">Find using index</button>
+    <button class="act" id="bScan">Find without index</button>
+    <span class="div"></span>
+    ${field('sName', 'name', 'text', 'Zoya')}
+    <button class="act" id="bName">Find by name</button>`;
+
+  $('#bNext').onclick = () => act(() => play(BT.insertGen(cur().tree, SC().presets[cur().next++])));
+  $('#bAll').onclick = () => act(async () => {
+    BT.P.turbo = true;
+    while (cur().next < SC().presets.length) {
+      await play(BT.insertGen(cur().tree, SC().presets[cur().next++]));
+      update();
+    }
+  });
+  $('#bIns').onclick = () => {
+    const a = $('#iA').value.trim(), b = comp ? $('#iB').value.trim() : '0';
+    if (a === '' || b === '') { BT.say(comp ? 'Enter both class and roll first.' : 'Enter an id first.', true); return; }
+    const row = comp ? { key: [+a, +b], sub: `Student ${a}-${b}` } : { key: +a, sub: `Student ${a}` };
+    act(() => play(BT.insertGen(cur().tree, row)));
+  };
+
+  if (comp) {
+    const read = need => {
+      const a = $('#sA').value.trim(), b = $('#sB').value.trim();
+      if ((need.includes('a') && a === '') || (need.includes('b') && b === '')) { BT.say('Fill in the search box first.', true); return null; }
+      return [+a, +b];
+    };
+    $('#bFind').onclick = () => { const v = read('ab'); if (v) act(() => play(BT.searchGen(cur().tree, v))); };
+    $('#bPrefix').onclick = () => { const v = read('a'); if (v) act(() => play(BT.prefixGen(cur().tree, v[0]))); };
+    $('#bRoll').onclick = () => { const v = read('b'); if (v) act(() => play(BT.scanGen(cur().tree, r => r.key[1] === v[1],
+      `The tree is sorted by <b>class first</b>. Roll ${v[1]} appears inside <b>every</b> class, scattered across the tree, so the top nodes cannot point to it.`,
+      `"roll = ${v[1]}"`))); };
+  } else {
+    const readId = () => { const a = $('#sA').value.trim(); if (a === '') { BT.say('Enter an id first.', true); return null; } return +a; };
+    $('#bFind').onclick = () => { const v = readId(); if (v !== null) act(() => play(BT.searchGen(cur().tree, v))); };
+    $('#bScan').onclick = () => { const v = readId(); if (v !== null) act(() => play(BT.scanGen(cur().tree, r => r.key === v,
+      'Pretend there is <b>no index</b> on id.', `"id = ${v}"`))); };
+    $('#bName').onclick = () => {
+      const v = $('#sName').value.trim();
+      if (v === '') { BT.say('Enter a name first.', true); return; }
+      act(() => play(BT.scanGen(cur().tree, r => r.sub.toLowerCase() === v.toLowerCase(),
+        'There is <b>no index on name</b>. The tree is sorted by <b>id</b>, so the top nodes cannot say where a name is.',
+        `"name = ${esc(v)}"`)));
+    };
+  }
+
+  const enter = (inputs, btn) => inputs.forEach(id => { const el = $(id); if (el) el.onkeydown = e => { if (e.key === 'Enter') $(btn).click(); }; });
+  enter(['#iA', '#iB'], '#bIns');
+  enter(['#sA', '#sB'], '#bFind');
+  enter(['#sName'], '#bName');
+  update();
+}
+
+function update() {
+  const st = cur(), p = SC().presets, left = st.next < p.length, busy = BT.P.busy, created = !!st.tree;
+  $('#rowInsert').style.display = created ? 'flex' : 'none';
+  $('#rowSearch').style.display = created ? 'flex' : 'none';
+  $('#start').style.display = created ? 'none' : 'flex';
+  $('#bCreate').disabled = busy;
+  document.querySelectorAll('.act, #tabs button, #maxSel, #bReset').forEach(b => { b.disabled = busy; });
+  if (!busy) { $('#bNext').disabled = !left; $('#bAll').disabled = !left; }
+  $('#bNext').textContent = left ? `Next row: ${kt(p[st.next].key)}, ${p[st.next].sub}` : 'Sample rows done';
+}
+
+function showScenario() {
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.sc === sc));
+  $('#maxSel').value = cur().M;
+  buildControls();
+  view.clear('');
+  if (cur().lastFrame) BT.show(cur().lastFrame, true);
+  else BT.say(SC().intro);
+}
+
+$('#bCreate').onclick = () => act(async () => {
+  cur().tree = BT.newTree(cur().M, { keyType: SC().keyType });
+  update();
+  await play(createGen(cur().tree));
+});
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { if (!BT.P.busy) { sc = b.dataset.sc; showScenario(); } });
+$('#maxSel').onchange = () => {
+  states[sc] = freshState();
+  showScenario();
+  BT.say(`Max per node is now <b>${$('#maxSel').value}</b>. Create the table again to start.`);
+};
+$('#bReset').onclick = () => { if (!BT.P.busy) { states[sc] = freshState(); showScenario(); } };
+
+showScenario();
+</script>
+</body>
+</html>

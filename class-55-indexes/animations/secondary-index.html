@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secondary Index</title>
+<link rel="stylesheet" href="btree.css">
+<style>
+.split { display: grid; grid-template-columns: 1fr 1fr; }
+.split > .panel + .panel { border-left: 1px solid var(--line); }
+@media (max-width: 1000px) { .split { grid-template-columns: 1fr; } .split > .panel + .panel { border-left: none; border-top: 1px solid var(--line); } }
+.ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.ph b { font-size: 16px; }
+.ph span { color: var(--muted); font-size: 13px; }
+.ph .dot { width: 10px; height: 10px; border-radius: 3px; border: 2px solid; align-self: center; }
+.dot.sec { background: var(--sec); border-color: var(--sec-b); }
+.dot.pri { background: var(--top); border-color: var(--top-b); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>How a secondary index works</h1>
+    <nav class="pages">
+      <a href="bplus-tree.html">Primary key index</a>
+      <a class="on" href="secondary-index.html">Secondary index</a>
+      <a href="multi-index.html">Multiple indexes</a>
+      <a href="index-questions.html">Design questions</a>
+    </nav>
+  </header>
+
+  <div class="box">
+    <div class="row" id="rowTable">
+      <div class="row-t">Index</div>
+      <div class="row-c">
+        <button class="act primary" id="bIndex">CREATE INDEX idx_name ON students(name)</button>
+        <span class="or" id="indexNote">Builds a second tree, sorted by name.</span>
+      </div>
+    </div>
+    <div class="row" id="rowInsert">
+      <div class="row-t">Insert</div>
+      <div class="row-c">
+        <button class="act primary" id="bNext"></button>
+        <span class="div"></span>
+        <span class="or">Your own:</span>
+        <label class="in"><span>id</span><input id="iId" type="number" autocomplete="off"></label>
+        <label class="in"><span>name</span><input id="iName" type="text" autocomplete="off"></label>
+        <button class="act" id="bIns">Insert</button>
+      </div>
+    </div>
+    <div class="row" id="rowSearch">
+      <div class="row-t">Search</div>
+      <div class="row-c">
+        <label class="in"><span>name</span><input id="sName" type="text" value="Zoya" autocomplete="off"></label>
+        <button class="act primary" id="bFindName">Find using the name index</button>
+        <button class="act" id="bScanName">Find without index</button>
+        <span class="div"></span>
+        <label class="in"><span>id</span><input id="sId" type="number" value="18" autocomplete="off"></label>
+        <button class="act" id="bFindId">Find by id</button>
+      </div>
+    </div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div style="position: relative">
+      <div class="split">
+        <div class="panel">
+          <div class="ph"><span class="dot sec"></span><b>Secondary index on name</b><span>leaves hold name → id</span></div>
+          <div id="secTree"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="dot pri"></span><b>Primary key on id (the table itself)</b><span>leaves hold full rows</span></div>
+          <div id="priTree"></div>
+        </div>
+      </div>
+      <div class="start" id="start">
+        <div class="start-title">Table <code>students</code> with columns id and name</div>
+        <div class="start-sub">The primary key is <code>id</code>, so the table itself is a B+ tree sorted by id. A second index on <code>name</code> can be added in two ways:</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center">
+          <button id="bCreate" class="primary big">Add the index later</button>
+          <button id="bCreateWith" class="big">Index on name from the start</button>
+        </div>
+        <div class="start-sub" style="font-size: 13px">Left: table with 10 rows first, then <code>CREATE INDEX</code>. Right: <code>CREATE TABLE ... INDEX (name)</code>, so every insert fills both trees.</div>
+      </div>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <label>Max per node <select id="maxSel" autocomplete="off"><option>2</option><option selected>3</option><option>4</option></select></label>
+      <span class="hint">Real MySQL fits hundreds per node. Kept tiny here so the trees have a few levels.</span>
+      <span class="sp"></span>
+      <button id="bReset">Reset</button>
+    </div>
+  </div>
+</div>
+
+<script src="btree-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const { clone, esc, tok, countRows, leftmost } = BT;
+
+const START_ROWS = [[10,'Rahul'],[20,'Priya'],[5,'Amit'],[15,'Sneha'],[25,'Rohan'],[30,'Neha'],[12,'Kiran'],[18,'Zoya'],[27,'Arjun'],[3,'Meera']];
+const MORE_ROWS = [[8,'Vikram'],[22,'Anjali'],[35,'Dev'],[1,'Isha'],[40,'Kabir'],[17,'Tara']];
+const toRow = ([id, name]) => ({ key: id, sub: name });
+const nice = s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+
+const NO_INDEX = 'No index on name yet.<br>Every search by name would be a full table scan.';
+const secView = new BT.TreeView($('#secTree'), { minH: 400, maxScale: 1.1, rowsLabel: 'Entries', secondary: true, empty: NO_INDEX });
+const priView = new BT.TreeView($('#priTree'), { minH: 400, maxScale: 1.1 });
+BT.setup({ views: { sec: secView, pri: priView } });
+
+let st;
+const fresh = () => ({ P: null, S: null, next: 0, M: +$('#maxSel').value });
+
+async function act(fn) {
+  if (BT.P.busy) return;
+  BT.P.busy = true; update();
+  try { await fn(); } finally { BT.P.busy = false; BT.P.turbo = false; update(); }
+}
+
+// Clears old highlights before a new action.
+function plain() {
+  if (st.P) priView.render({ tree: clone(st.P) });
+  if (st.S) secView.render({ tree: clone(st.S) });
+}
+
+const indexEntry = row => ({ key: row.sub, sub: `id ${row.key}`, ref: row.key });
+
+function* createTableGen(P, rows) {
+  yield { msg: 'CREATE TABLE ran. The <b>PRIMARY KEY (id)</b> means the table itself is stored as a B+ tree sorted by id. Now 10 rows go in.', views: { pri: { tree: clone(P), hl: { [P.root]: 'new' } } } };
+  for (const row of rows) yield* BT.inView(BT.insertGen(P, row), 'pri', { quick: true });
+  yield { msg: `The table has <b>${countRows(P)}</b> rows, sorted by id. There is <b>no index on name</b> yet. Next: create one.`, views: { pri: { tree: clone(P) } } };
+}
+
+function* createWithIndexGen(P, S, rows) {
+  yield { msg: '<b>CREATE TABLE</b> with <code>INDEX (name)</code>: MySQL creates <b>two empty trees</b> right away, the table (sorted by id) and the name index (sorted by name). Every insert will now go into <b>both</b>.',
+    views: { pri: { tree: clone(P), hl: { [P.root]: 'new' } }, sec: { tree: clone(S), hl: { [S.root]: 'new' } } } };
+  for (const row of rows) yield* BT.quick(insertBothGen(P, S, row));
+  yield { msg: `Both trees have <b>${countRows(P)}</b> entries. They grew together, one insert at a time. The index holds the same entries as if it were added later.`,
+    views: { pri: { tree: clone(P) }, sec: { tree: clone(S) } } };
+}
+
+function* buildIndexGen(P, S) {
+  yield { msg: '<b>CREATE INDEX</b>: MySQL builds a <b>second B+ tree</b>, sorted by <b>name</b>. The names only exist in the table right now, so it must <b>read every existing row</b> from the table (right) and copy its <b>name</b> and <b>id</b> into the new tree (left).',
+    views: { sec: { tree: clone(S), hl: { [S.root]: 'new' } }, pri: { tree: clone(P) } } };
+  let leaf = leftmost(P), count = 0;
+  while (leaf) {
+    for (let i = 0; i < leaf.rows.length; i++) {
+      const r = leaf.rows[i], quick = count > 0;
+      yield { quick, msg: `Reading existing row <b>${r.key}, ${esc(r.sub)}</b> from the table (right) → add <b>${esc(r.sub)} → id ${r.key}</b> to the name index (left).`,
+        views: { pri: { tree: clone(P), hl: { [leaf.id]: 'current' }, rows: { [leaf.id + ':' + i]: 'found' } } } };
+      yield* BT.inView(BT.insertGen(S, indexEntry(r)), 'sec', { quick });
+      count++;
+    }
+    leaf = leaf.next ? P.nodes[leaf.next] : null;
+  }
+  yield { msg: 'Index ready. It is a <b>separate tree sorted by name</b>, and its leaves hold only <b>name → id</b>. The full rows still live only in the primary key tree on the right.',
+    views: { sec: { tree: clone(S) }, pri: { tree: clone(P) } } };
+}
+
+function* insertBothGen(P, S, row) {
+  const ok = yield* BT.inView(BT.insertGen(P, row), 'pri');
+  if (!ok) return;
+  if (!S) {
+    yield { msg: 'There is no index on name yet, so only <b>one tree</b> had to change.', views: {} };
+    return;
+  }
+  yield { msg: 'The row is in the table. But there is also an <b>index on name</b>, so MySQL must update that tree too.', views: { pri: { tree: clone(P) } } };
+  yield* BT.inView(BT.insertGen(S, indexEntry(row)), 'sec');
+  yield { msg: 'One INSERT, <b>two trees</b> updated. Every extra index makes writes slower, which is why you only index the columns you actually search by.', views: {} };
+}
+
+function* nameLookupGen(P, S, name) {
+  yield { msg: `<b>Step 1:</b> search the <b>name index</b> for <b>${esc(name)}</b>. It is sorted by name, so it can use the same top-down walk.`, views: {} };
+  const a = yield* BT.inView(BT.searchGen(S, name, { note: false }), 'sec');
+  if (!a.row) return;
+  const id = a.row.ref;
+  yield { msg: `The index leaf gives us <b>id ${id}</b>, not the full row. <b>Step 2:</b> look up id ${id} in the <b>primary key tree</b> to get the whole row.`,
+    views: { pri: { tree: clone(P), token: tok(id, P.root, 'up'), hl: { [P.root]: 'current' } } } };
+  const b = yield* BT.inView(BT.searchGen(P, id, { note: false }), 'pri');
+  yield { msg: `Done. <b>${a.reads}</b> nodes in the name index + <b>${b.reads}</b> in the primary key tree = <b>${a.reads + b.reads}</b> reads. A full table scan would check all <b>${countRows(P)}</b> rows.`, views: {} };
+}
+
+$('#bCreate').onclick = () => act(async () => {
+  st.P = BT.newTree(st.M, { keyType: 'num' });
+  update();
+  await BT.run(createTableGen(st.P, START_ROWS.map(toRow)));
+});
+
+$('#bCreateWith').onclick = () => act(async () => {
+  st.P = BT.newTree(st.M, { keyType: 'num' });
+  st.S = BT.newTree(st.M, { keyType: 'str', kind: 'secondary', unique: false });
+  update();
+  await BT.run(createWithIndexGen(st.P, st.S, START_ROWS.map(toRow)));
+});
+
+$('#bIndex').onclick = () => act(async () => {
+  plain();
+  st.S = BT.newTree(st.M, { keyType: 'str', kind: 'secondary', unique: false });
+  await BT.run(buildIndexGen(st.P, st.S));
+});
+
+$('#bNext').onclick = () => act(async () => {
+  plain();
+  await BT.run(insertBothGen(st.P, st.S, toRow(MORE_ROWS[st.next++])));
+});
+
+$('#bIns').onclick = () => {
+  const id = $('#iId').value.trim(), name = $('#iName').value.trim();
+  if (id === '' || name === '') { BT.say('Enter both an id and a name first.', true); return; }
+  act(async () => { plain(); await BT.run(insertBothGen(st.P, st.S, { key: +id, sub: nice(name) })); });
+};
+
+$('#bFindName').onclick = () => {
+  const v = $('#sName').value.trim();
+  if (v === '') { BT.say('Enter a name first.', true); return; }
+  act(async () => { plain(); await BT.run(nameLookupGen(st.P, st.S, nice(v))); });
+};
+
+$('#bScanName').onclick = () => {
+  const v = $('#sName').value.trim();
+  if (v === '') { BT.say('Enter a name first.', true); return; }
+  const name = nice(v);
+  act(async () => {
+    plain();
+    await BT.run(BT.inView(BT.scanGen(st.P, r => r.sub === name,
+      st.S ? 'Pretend the name index does not exist.' : 'There is <b>no index on name</b>. The table is sorted by id, so its top nodes cannot say where a name is.',
+      `"name = ${esc(name)}"`), 'pri'));
+  });
+};
+
+$('#bFindId').onclick = () => {
+  const v = $('#sId').value.trim();
+  if (v === '') { BT.say('Enter an id first.', true); return; }
+  act(async () => { plain(); await BT.run(BT.inView(BT.searchGen(st.P, +v), 'pri')); });
+};
+
+const enter = (ids, btn) => ids.forEach(id => { $(id).onkeydown = e => { if (e.key === 'Enter') $(btn).click(); }; });
+enter(['#iId', '#iName'], '#bIns');
+enter(['#sName'], '#bFindName');
+enter(['#sId'], '#bFindId');
+
+function update() {
+  const busy = BT.P.busy, hasP = !!st.P, hasS = !!st.S, left = st.next < MORE_ROWS.length;
+  $('#start').style.display = hasP ? 'none' : 'flex';
+  ['#rowTable', '#rowInsert', '#rowSearch'].forEach(id => { $(id).style.display = hasP ? 'flex' : 'none'; });
+  $('#bCreate').disabled = busy;
+  $('#bCreateWith').disabled = busy;
+  document.querySelectorAll('.act, #maxSel, #bReset').forEach(b => { b.disabled = busy; });
+  if (!busy) {
+    $('#bIndex').disabled = hasS;
+    $('#bNext').disabled = !left;
+    $('#bFindName').disabled = !hasS;
+  }
+  $('#indexNote').textContent = hasS ? 'Index created.' : 'Builds a second tree, sorted by name.';
+  $('#bNext').textContent = left ? `Next row: ${MORE_ROWS[st.next][0]}, ${MORE_ROWS[st.next][1]}` : 'Sample rows done';
+}
+
+function reset() {
+  st = fresh();
+  secView.clear();
+  priView.clear('');
+  BT.say('Start with a table of students. The primary key is id.');
+  update();
+}
+
+$('#bReset').onclick = () => { if (!BT.P.busy) reset(); };
+$('#maxSel').onchange = () => { if (!BT.P.busy) reset(); };
+
+reset();
+</script>
+</body>
+</html>
