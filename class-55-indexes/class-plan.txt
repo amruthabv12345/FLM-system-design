@@ -1,0 +1,71 @@
+Class 55: Indexes
+Material: animations/ (open with Live Server)  |  index-demo.sql (MySQL Workbench)  |  explaining-log(1000)-vs-o(n).pdf
+
+1. The problem: full table scan (Workbench, index-demo.sql blocks 1-3)
+   - Create students table, insert 1,000,000 rows (takes 10-30 s; raise Workbench read timeout if needed)
+   - WHERE id = 500000 -> instant (primary key)
+   - WHERE email = '...' -> slow: MySQL checks every row
+   - EXPLAIN FORMAT=TRADITIONAL: type = ALL, key = NULL, rows ~ 1,000,000
+   - Work grows with the data: double the rows, double the time
+
+2. The idea: sorted data + jump (pdf)
+   - Book index analogy: look up the word, jump to the page
+   - Sorted -> halve each step: O(log n) vs O(n)
+   - Why not a sorted array: inserts in the middle shift everything
+
+3. B+ tree basics (animations/bplus-tree.html, 1 column tab)
+   - Create table -> one empty leaf is the index
+   - Insert rows one by one: leaf fills up -> splits -> first key copied up
+   - Root splits -> tree grows one level, only from the top (all leaves same depth)
+   - Top nodes: only key values, used to pick a direction
+   - Leaves: full rows, sorted, linked left to right
+   - Max per node: 2-4 here, hundreds in real MySQL (one node = one 16 KB page)
+   - Nodes live on disk; used nodes are cached in RAM (buffer pool); nothing rebuilt on restart
+
+4. Primary key lookup vs full scan (same tab)
+   - Find using index: walk root -> leaf, 3 nodes read
+   - Find without index / Find by name: check every row
+   - The tree only helps for the column it is sorted by (id), not name
+
+5. Composite primary key + leftmost rule (2 column tab: class, roll_no)
+   - Sorted by class first, then roll_no
+   - class + roll -> tree lookup
+   - class only -> jump to class, walk the linked leaves, stop at next class
+   - roll only -> full scan (roll appears in every class)
+   - Order inside WHERE does not matter; order of columns in the INDEX does
+
+6. Secondary index (animations/secondary-index.html)
+   - Also a B+ tree; leaves hold name -> id, not the full row
+   - Create later (CREATE INDEX reads every existing row from the table) or at CREATE TABLE
+   - Lookup = 2 steps: name index -> id -> primary key tree -> full row
+   - Every INSERT now updates 2 trees
+
+7. Live demo again (index-demo.sql block 4)
+   - CREATE INDEX idx_email -> same query is now instant
+   - EXPLAIN FORMAT=TRADITIONAL: type = ref, key = idx_email, rows = 1
+   - EXPLAIN ANALYZE: "Index lookup on students using idx_email"
+
+8. Multiple indexes (animations/multi-index.html)
+   - name = 'Zoya' without index -> full scan; with idx_name -> 6 reads (why we index)
+   - city = 'Pune' -> 5 matches, each a trip to the table -> worse than a scan (low selectivity)
+   - name AND city -> MySQL picks the index with fewer matches, checks the other column on the row
+   - Same query with conditions reversed -> same plan
+   - LIKE '%ya' -> index cannot help
+   - INSERT -> 3 trees updated (the cost of indexes: slower writes, more disk)
+   - Cost table at the bottom to compare everything
+
+9. Bonus in Workbench (index-demo.sql blocks 5-6)
+   - LIKE 'student500000%' uses the index (range), LIKE '%500000@mail.com' does not
+   - INDEX (city, age): city + age uses it in either order, age alone does not
+
+10. System design questions (animations/index-questions.html)
+    - Ask first, reveal, play the picture
+    - Order history newest first -> (user_id, created_at)
+    - Flash sale category + price -> (category, price)
+    - Login + unique email -> UNIQUE (email)
+    - Index is_active? -> usually no
+    - 50K inserts/sec -> few indexes
+    - Listing needs only name, price -> covering index
+    - Search "contains" -> FULLTEXT / search engine
+    - Deep pagination -> keyset (WHERE id < last_seen_id)
+    - Auto-increment vs random UUID primary key
