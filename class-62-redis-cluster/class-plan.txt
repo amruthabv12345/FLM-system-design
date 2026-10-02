@@ -1,0 +1,15 @@
+Class 62: Redis in a clustered setup
+
+1. Two copies of the app behind a load balancer
+   - Without shared state: login on copy 1, next request on copy 2 -> logged out
+   - With Redis as the shared session store and cache -> works on both copies
+   - (Recap of the stateless lesson, now with real code)
+
+2. Redis replication
+   - One primary, replicas copy from it (same idea as read replicas)
+
+3. Redis Cluster
+   - Keys split across nodes using hash slots
+   - First look at sharding: each node holds a part of the data
+
+Setup: Docker (multiple app instances + Redis containers)

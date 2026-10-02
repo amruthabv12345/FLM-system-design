@@ -1,0 +1,26 @@
+Class 58: NoSQL concepts + MongoDB queries
+
+1. Why NoSQL exists
+   - SQL: fixed tables, joins, transactions, mostly one machine
+   - NoSQL: flexible shape of data, built to spread across many machines
+   - Link to CAP: different NoSQL databases make different C vs A choices
+
+2. Types of NoSQL (one line each)
+   - Key-value: Redis
+   - Document: MongoDB
+   - Wide-column: Cassandra
+   - Graph: Neo4j
+
+3. Documents vs tables
+   - database -> database, table -> collection, row -> document, column -> field
+   - Documents can hold arrays and nested objects
+   - Two documents in the same collection can have different fields
+
+4. MongoDB queries in the shell, next to the SQL equivalent
+   - insertOne / insertMany        vs  INSERT
+   - find, find with a filter      vs  SELECT ... WHERE
+   - updateOne ($set)              vs  UPDATE
+   - deleteOne                     vs  DELETE
+   - Query inside an array / nested field (no SQL equivalent without joins)
+
+Setup: MongoDB running locally (Docker), mongosh

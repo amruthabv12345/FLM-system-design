@@ -1,0 +1,20 @@
+Class 60: Redis basics
+
+1. What Redis is
+   - In-memory key-value store: very fast, data lives in RAM
+   - Can also save to disk, but RAM is the point
+
+2. Data types with redis-cli
+   - String: SET / GET / INCR (counters)
+   - Hash: HSET / HGET (an object, like a user)
+   - List: LPUSH / LRANGE (recent items)
+   - Set: SADD / SMEMBERS (unique items)
+   - Sorted set: ZADD / ZRANGE (leaderboard, top movies)
+
+3. Expiry
+   - EXPIRE / TTL: keys that delete themselves
+
+4. Real uses
+   - Cache, session store, counters, leaderboards, rate limiting
+
+Setup: Redis running locally (Docker), redis-cli

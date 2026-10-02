@@ -1,0 +1,21 @@
+Class 59: MongoDB + Spring Boot, a real case over SQL
+
+1. The use case: movie details
+   - One movie has languages, cast, formats (2D/3D/IMAX) and reviews
+   - Every movie has a slightly different shape
+   - In SQL: 4-5 tables + joins
+   - In MongoDB: one document, read in one query
+
+2. Connect Spring Boot to MongoDB
+   - Dependency: Spring Data MongoDB
+   - spring.data.mongodb.uri in application.properties
+   - @Document class, MongoRepository (same idea as JpaRepository)
+
+3. APIs
+   - Add a movie, get a movie, find movies by language, add a review
+
+4. Compare with SQL
+   - Show the SQL tables + join needed for the same "get movie" API
+   - When to still pick SQL: bookings and payments (transactions)
+
+Setup: MongoDB running locally (Docker)

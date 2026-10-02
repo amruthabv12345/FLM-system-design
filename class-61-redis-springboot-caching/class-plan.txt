@@ -1,0 +1,18 @@
+Class 61: Redis + Spring Boot caching
+
+1. The problem
+   - A slow API (database call that takes ~2 s)
+
+2. Cache-aside
+   - Check Redis -> hit: return it
+   - Miss: read from the database, store in Redis, return
+   - Time the API without and with the cache
+
+3. TTL
+   - Cached data expires after a set time
+
+4. Stale data
+   - Update the database -> cache still has the old value
+   - Fix: delete (evict) the cache entry on update
+
+Setup: Redis running locally (Docker)
