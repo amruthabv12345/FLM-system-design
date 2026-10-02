@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class 57 — Animated Reels</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#11161c; --surface:#1a212b; --surface-2:#212b36; --fg:#eef2f6; --muted:#7e8ca0; --border:#2b3542;
+  --accent:#f2a65a; --accent-2:#5fd4c6; --accent-3:#9b8cf2; --bad:#e2685f; --track:#2b3542;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#eef1f4; --surface:#ffffff; --surface-2:#e4e9ee; --fg:#1b232c; --muted:#5b6b7c; --border:#d4dce3;
+    --accent:#c77a2e; --accent-2:#1f8f80; --accent-3:#6a5cd6; --bad:#c6453c; --track:#dde4ea;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef1f4; --surface:#ffffff; --surface-2:#e4e9ee; --fg:#1b232c; --muted:#5b6b7c; --border:#d4dce3;
+  --accent:#c77a2e; --accent-2:#1f8f80; --accent-3:#6a5cd6; --bad:#c6453c; --track:#dde4ea;
+  color-scheme: light;
+}
+*{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--fg); font-family:"IBM Plex Sans",system-ui,sans-serif;}
+.wrap{max-width:1040px; margin:0 auto; padding-inline:20px; padding-block:28px 48px;}
+h1{font-size:clamp(20px,3.6vw,27px); font-weight:700; margin:0 0 14px; letter-spacing:-0.01em;}
+nav.tabs{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;}
+nav.tabs button{font-family:"IBM Plex Sans",sans-serif; font-size:13px; font-weight:500; color:var(--muted);
+  background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:7px 14px; cursor:pointer;}
+nav.tabs button.on{background:var(--fg); color:var(--bg); border-color:var(--fg);}
+nav.tabs button:hover:not(.on){color:var(--fg); border-color:var(--accent);}
+figure.diagram{margin:0; position:relative; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:16px;}
+.toolbar{position:absolute; top:14px; right:14px; display:flex; gap:8px; z-index:2;}
+.toolbar button{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--muted); background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:6px 12px; cursor:pointer;}
+.toolbar button:hover{color:var(--fg); border-color:var(--accent);}
+svg#stage{display:block; width:100%; height:auto;}
+.box{fill:var(--surface-2); stroke:var(--border); stroke-width:1.5; transform-box:fill-box; transform-origin:center;}
+.box.pulse{animation:boxPulse .4s ease;}
+.box.client{stroke:var(--border);} .box.proxy{stroke:var(--accent-3);} .box.gateway{stroke:var(--accent-3);}
+.box.lb{stroke:var(--accent);} .box.server{stroke:var(--accent-2);} .box.db{stroke:var(--accent-2);}
+.box.bad{stroke:var(--bad);}
+.box-label{fill:var(--fg); font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:14px; text-anchor:middle;}
+.box-sub{fill:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:10.5px; text-anchor:middle;}
+.stat-num{fill:var(--fg); font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:20px; text-anchor:middle; font-variant-numeric:tabular-nums;}
+.guide{fill:none; stroke:var(--muted); stroke-opacity:.35; stroke-width:2;}
+.guide.warn{stroke:var(--bad); stroke-opacity:.6; stroke-dasharray:4 5;}
+.guide.dashed{stroke-dasharray:4 5;}
+.arrowhead{fill:var(--muted); opacity:.35;}
+.arrowhead.warn{fill:var(--bad); opacity:.7;}
+.lbl{fill:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:10.5px; text-anchor:middle; letter-spacing:.02em;}
+.lbl.strong{fill:var(--fg); font-weight:600;}
+.lbl.title{fill:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; text-anchor:start;}
+.token{fill:var(--accent);}
+.token.ok{fill:var(--accent-2);} .token.bad{fill:var(--bad);} .token.alt{fill:var(--accent-3);}
+.dot{fill:var(--muted); opacity:.5;}
+@keyframes boxPulse{0%{filter:brightness(1)} 35%{filter:brightness(1.4)} 100%{filter:brightness(1)}}
+@media (prefers-reduced-motion: reduce){ .box.pulse{animation:none} }
+figcaption{margin-top:14px; color:var(--muted); font-size:13.5px; line-height:1.55; max-width:72ch;}
+figcaption strong{color:var(--fg); font-weight:600;}
+.note{margin-top:8px; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted);}
+.mini-ctl{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;}
+.mini-ctl button{font-family:"IBM Plex Sans",sans-serif; font-size:12.5px; color:var(--fg); background:var(--surface-2);
+  border:1px solid var(--border); border-radius:8px; padding:6px 12px; cursor:pointer;}
+.mini-ctl button.on{background:var(--accent-3); border-color:var(--accent-3); color:#fff;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Class 57 — Microservices, animated</h1>
+  <nav class="tabs" id="tabs"></nav>
+  <figure class="diagram">
+    <div class="toolbar"><button id="toggleBtn" type="button">Pause</button></div>
+    <svg id="stage" xmlns="http://www.w3.org/2000/svg" role="img"><defs></defs><g id="layer"></g></svg>
+    <div id="extraCtl" class="mini-ctl"></div>
+    <figcaption id="caption"></figcaption>
+    <p id="reducedNote" class="note" hidden>Animation paused — your system is set to reduce motion.</p>
+  </figure>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function el(tag, attrs){ const e=document.createElementNS(NS,tag); for(const k in attrs) if(attrs[k]!=null) e.setAttribute(k,attrs[k]); return e; }
+function easeInQuad(t){ return t*t; }
+function easeInOutQuad(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+function quad(p0,pc,p2,t){ const m=1-t; return { x:m*m*p0.x+2*m*t*pc.x+t*t*p2.x, y:m*m*p0.y+2*m*t*pc.y+t*t*p2.y }; }
+function pulse(node){ if(!node) return; node.classList.remove('pulse'); void node.getBBox(); node.classList.add('pulse'); }
+
+function box(layer,{id,x,y,w,h,label,sub,kind='server'}){
+  const g=el('g',{});
+  const r=el('rect',{x,y,width:w,height:h,rx:14,class:'box '+kind}); if(id) r.id=id;
+  g.appendChild(r);
+  const t1=el('text',{x:x+w/2,y:y+h/2+(sub?-4:5),class:'box-label','text-anchor':'middle'}); t1.textContent=label; g.appendChild(t1);
+  if(sub){ const t2=el('text',{x:x+w/2,y:y+h/2+15,class:'box-sub','text-anchor':'middle'}); t2.textContent=sub; g.appendChild(t2); }
+  layer.appendChild(g);
+  return { rect:r, g, cx:x+w/2, cy:y+h/2, x,y,w,h };
+}
+
+function guide(layer,d,opts={}){
+  const p=el('path',{d,class:'guide'+(opts.cls?(' '+opts.cls):''),'marker-end':opts.arrow===false?null:'url(#arrow)'});
+  layer.appendChild(p);
+  return p;
+}
+function label(layer,x,y,text,cls=''){
+  const t=el('text',{x,y,class:'lbl '+cls,'text-anchor':'middle'}); t.textContent=text; layer.appendChild(t); return t;
+}
+function dots(layer,x,y,n=3,gap=14){
+  for(let i=0;i<n;i++) layer.appendChild(el('circle',{cx:x+(i-(n-1)/2)*gap, cy:y, r:2.5, class:'dot'}));
+}
+
+// Generic token-flow engine: tokens travel through a sequence of waypoints.
+// path[0] = start {x,y}; path[i>0] = {x,y,dur,ease,ctrl?,dwell?,onArrive?}
+function makeFlow(layer, { spawnMs, make }){
+  let tokens = [], running = false, raf = null, spawnTimer = 0;
+
+  function spawnOne(path, cls, r){
+    const t0 = path[0];
+    const c = el('circle',{cx:t0.x, cy:t0.y, r:r||7, class:'token '+(cls||'')});
+    layer.appendChild(c);
+    tokens.push({ el:c, path, seg:0, segStart:performance.now(), dwelling:false });
+  }
+
+  function tick(now){
+    if (spawnMs){
+      if (!spawnTimer) spawnTimer = now;
+      if (now - spawnTimer >= spawnMs){ const d = make(); spawnOne(d.path, d.cls, d.r); spawnTimer = now; }
+    }
+    for (let i = tokens.length - 1; i >= 0; i--){
+      const tk = tokens[i];
+      const from = tk.path[tk.seg], to = tk.path[tk.seg+1];
+      if (!to){ tk.el.remove(); tokens.splice(i,1); continue; }
+      if (tk.dwelling){
+        if (now - tk.segStart >= (from.dwell || 0)){ tk.dwelling = false; tk.segStart = now; }
+        continue;
+      }
+      const dur = to.dur || 700, ease = to.ease || easeInOutQuad;
+      const t = Math.min(1, (now - tk.segStart) / dur);
+      const p = to.ctrl ? quad(from, to.ctrl, to, ease(t)) : { x: from.x+(to.x-from.x)*ease(t), y: from.y+(to.y-from.y)*ease(t) };
+      tk.el.setAttribute('cx', p.x.toFixed(1));
+      tk.el.setAttribute('cy', p.y.toFixed(1));
+      if (t >= 1){
+        if (to.onArrive) to.onArrive();
+        tk.seg++;
+        tk.segStart = now;
+        if (to.dwell) tk.dwelling = true;
+      }
+    }
+    if (running) raf = requestAnimationFrame(tick);
+  }
+
+  return {
+    start(){ if (running) return; running = true; spawnTimer = 0; raf = requestAnimationFrame(tick); },
+    stop(){ running = false; if (raf) cancelAnimationFrame(raf); },
+    clear(){ tokens.forEach(t => t.el.remove()); tokens = []; },
+    fire(path, cls, r){ spawnOne(path, cls, r); }
+  };
+}
+
+// ---------- scene registry (filled in below) ----------
+const SCENES = [];
+let activeCtl = null;
+
+function mountScene(def){
+  if (activeCtl){ activeCtl.stop(); activeCtl.clear && activeCtl.clear(); }
+  const svg = document.getElementById('stage');
+  svg.setAttribute('viewBox', def.viewBox || '0 0 800 460');
+  const defs = svg.querySelector('defs');
+  defs.innerHTML = `
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arrowWarn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead warn" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>`;
+  let layer = svg.querySelector('#layer');
+  if (!layer){ layer = el('g',{id:'layer'}); svg.appendChild(layer); }
+  layer.innerHTML = '';
+  layer.setAttribute('filter','url(#glow)');
+  document.getElementById('caption').innerHTML = def.caption;
+  document.getElementById('extraCtl').innerHTML = '';
+  activeCtl = def.mount(layer);
+  if (!reduceMotion) activeCtl.start();
+  document.getElementById('toggleBtn').textContent = reduceMotion ? 'Play' : 'Pause';
+  document.getElementById('reducedNote').hidden = !reduceMotion;
+}
+
+function buildTabs(){
+  const nav = document.getElementById('tabs');
+  nav.innerHTML = SCENES.map((s,i) => `<button data-i="${i}">${s.label}</button>`).join('');
+  nav.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    nav.querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+    mountScene(SCENES[+b.dataset.i]);
+  }));
+  nav.querySelector('button').classList.add('on');
+}
+
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  if (!activeCtl) return;
+  const btn = document.getElementById('toggleBtn');
+  if (btn.textContent === 'Pause'){ activeCtl.stop(); btn.textContent = 'Play'; }
+  else { activeCtl.start(); btn.textContent = 'Pause'; }
+});
+</script>
+<script>
+// ---------- scenes ----------
+function sceneLoadBalancer(){
+  const SERVER_DEFS = [
+    { bx:80,  cx:145, qx:272.5 },
+    { bx:250, cx:315, qx:357.5 },
+    { bx:420, cx:485, qx:442.5 },
+    { bx:590, cx:655, qx:527.5 },
+  ];
+  return {
+    label: 'Load balancer',
+    viewBox: '0 0 800 460',
+    caption: `Different algorithms pick the "next" server differently. <strong>Round robin</strong> just rotates. <strong>Least connections</strong> picks whoever is least busy right now. <strong>IP hash</strong> always sends the same client to the same server — no memory needed, just math. <strong>Health checks</strong> quietly skip a server that stops responding.`,
+    mount(layer){
+      const ctlBox = document.getElementById('extraCtl');
+      ctlBox.innerHTML = `<button data-m="rr" class="on">Round robin</button><button data-m="lc">Least connections</button><button data-m="hash">IP hash</button><button data-m="health">Health checks</button>`;
+      let mode = 'rr', flow = null;
+
+      function drawBase(){
+        layer.innerHTML = '';
+        dots(layer, 400, 8, 3, 14);
+        label(layer, 400, 26, 'client requests');
+        guide(layer, 'M400,34 L400,111');
+        const lb = box(layer, { x:310, y:115, w:180, h:70, label:'Load Balancer', sub:'—', kind:'lb' });
+        const SV = SERVER_DEFS.map((s, i) => {
+          guide(layer, `M400,185 Q${s.qx},230 ${s.cx},330`);
+          const r = el('rect', { x:s.bx, y:330, width:130, height:100, rx:14, class:'box server' });
+          layer.appendChild(r);
+          label(layer, s.cx, 354, 'Server ' + (i + 1), 'strong');
+          const stat = el('text', { x:s.cx, y:390, class:'stat-num' }); stat.textContent = '0';
+          layer.appendChild(stat);
+          const statLbl = label(layer, s.cx, 406, 'requests');
+          layer.appendChild(el('rect', { x:s.bx+15, y:414, width:100, height:6, rx:3, fill:'var(--track)' }));
+          const fillBar = el('rect', { x:s.bx+15, y:414, width:0, height:6, rx:3, fill:'var(--accent-2)' });
+          layer.appendChild(fillBar);
+          return { rect:r, cx:s.cx, qx:s.qx, stat, statLbl, fillBar, n:0, down:false };
+        });
+        return { lb, SV };
+      }
+
+      function paintBars(SV){
+        const max = Math.max(1, ...SV.map(s => s.n));
+        SV.forEach(s => { s.stat.textContent = s.n; s.fillBar.setAttribute('width', (s.n / max * 100)); });
+      }
+
+      function build(){
+        if (flow) flow.stop();
+        const { lb, SV } = drawBase();
+        const lbSub = lb.g.querySelector('.box-sub');
+
+        if (mode === 'rr'){
+          lbSub.textContent = 'next → Server 1';
+          let next = 0;
+          flow = makeFlow(layer, { spawnMs:700, make(){
+            const t = SV[next]; next = (next + 1) % SV.length;
+            lbSub.textContent = 'next → Server ' + (next + 1);
+            return { path:[
+              { x:400, y:34 },
+              { x:400, y:185, dur:600, ease:easeInQuad, dwell:180, onArrive:() => pulse(lb.rect) },
+              { x:t.cx, y:330, dur:900, ctrl:{ x:t.qx, y:230 }, onArrive:() => { t.n++; paintBars(SV); pulse(t.rect); } }
+            ], cls:'ok' };
+          }});
+        }
+
+        else if (mode === 'lc'){
+          lbSub.textContent = 'picks: fewest active';
+          SV.forEach(s => { s.statLbl.textContent = 'active'; });
+          flow = makeFlow(layer, { spawnMs:550, make(){
+            const t = SV.slice().sort((a, b) => a.n - b.n)[0];
+            t.n++; paintBars(SV);
+            const life = 1600 + Math.random() * 1400;
+            return { path:[
+              { x:400, y:34 },
+              { x:400, y:185, dur:600, ease:easeInQuad, dwell:180, onArrive:() => pulse(lb.rect) },
+              { x:t.cx, y:330, dur:700, ctrl:{ x:t.qx, y:230 }, onArrive:() => {
+                pulse(t.rect);
+                setTimeout(() => { t.n = Math.max(0, t.n - 1); paintBars(SV); }, life);
+              } }
+            ], cls:'ok' };
+          }});
+        }
+
+        else if (mode === 'hash'){
+          lbSub.textContent = 'hash(client IP) % 4';
+          SV.forEach(s => { s.statLbl.textContent = 'requests'; });
+          const CLIENTS = [
+            { ip:'49.1.1.1', cls:'',    target:0 },
+            { ip:'49.2.2.2', cls:'ok',  target:2 },
+            { ip:'49.3.3.3', cls:'alt', target:1 },
+          ];
+          let next = 0;
+          flow = makeFlow(layer, { spawnMs:650, make(){
+            const c = CLIENTS[next]; next = (next + 1) % CLIENTS.length;
+            const t = SV[c.target];
+            lbSub.textContent = 'hash(' + c.ip + ') → Server ' + (c.target + 1);
+            return { path:[
+              { x:400, y:34 },
+              { x:400, y:185, dur:600, ease:easeInQuad, dwell:160, onArrive:() => pulse(lb.rect) },
+              { x:t.cx, y:330, dur:850, ctrl:{ x:t.qx, y:230 }, onArrive:() => { t.n++; paintBars(SV); pulse(t.rect); } }
+            ], cls:c.cls };
+          }});
+        }
+
+        else {
+          lbSub.textContent = 'checking servers…';
+          SV.forEach(s => { s.statLbl.textContent = 'requests'; });
+          let next = 0, tick = 0, downIdx = -1;
+          const healthTimer = setInterval(() => {
+            tick++;
+            if (tick === 5){
+              downIdx = 1;
+              SV[downIdx].down = true;
+              SV[downIdx].rect.classList.add('bad');
+              SV[downIdx].rect.style.opacity = .4;
+              lbSub.textContent = 'Server 2 down — skipped';
+            }
+            if (tick === 10){
+              SV[downIdx].down = false;
+              SV[downIdx].rect.classList.remove('bad');
+              SV[downIdx].rect.style.opacity = 1;
+              lbSub.textContent = 'Server 2 recovered';
+              downIdx = -1;
+            }
+          }, 1400);
+          flow = makeFlow(layer, { spawnMs:650, make(){
+            let tries = 0, idx;
+            do { idx = next % SV.length; next++; tries++; } while (SV[idx].down && tries < SV.length);
+            const t = SV[idx];
+            return { path:[
+              { x:400, y:34 },
+              { x:400, y:185, dur:600, ease:easeInQuad, dwell:160, onArrive:() => pulse(lb.rect) },
+              { x:t.cx, y:330, dur:850, ctrl:{ x:t.qx, y:230 }, onArrive:() => { t.n++; paintBars(SV); pulse(t.rect); } }
+            ], cls:'ok' };
+          }});
+          const origStop = flow.stop.bind(flow);
+          flow.stop = () => { origStop(); clearInterval(healthTimer); };
+        }
+      }
+
+      ctlBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        mode = b.dataset.m;
+        ctlBox.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        build();
+        flow.start();
+      }));
+
+      build();
+      return {
+        start(){ flow.start(); },
+        stop(){ if (flow) flow.stop(); },
+        clear(){ if (flow) flow.clear(); }
+      };
+    }
+  };
+}
+
+function sceneProxies(){
+  return {
+    label: 'Proxies',
+    viewBox: '0 0 900 480',
+    caption: `<strong>Forward proxy</strong> works for the client — it hides who's asking, and can block sites (top). <strong>Reverse proxy</strong> works for the servers — it hides which server answered, and spreads requests across them (bottom).`,
+    mount(layer){
+      label(layer, 40, 26, 'FORWARD PROXY · works for the client', 'title');
+      const c1 = box(layer, { x:40, y:48, w:150, h:60, label:'Office laptop', sub:'10.0.0.5', kind:'client' });
+      const fp = box(layer, { x:330, y:48, w:170, h:60, label:'Forward proxy', sub:'company proxy', kind:'proxy' });
+      const siteA = box(layer, { x:690, y:18, w:170, h:52, label:'youtube.com', kind:'server' });
+      const siteB = box(layer, { x:690, y:96, w:170, h:52, label:'instagram.com', sub:'company-blocked', kind:'server bad' });
+      guide(layer, `M${c1.x+c1.w},${c1.cy} L${fp.x},${fp.cy}`);
+      guide(layer, `M${fp.x+fp.w},${fp.cy} Q${(fp.x+fp.w+siteA.x)/2},${fp.cy-28} ${siteA.x},${siteA.cy}`);
+      guide(layer, `M${fp.x+fp.w},${fp.cy} Q${(fp.x+fp.w+siteB.x)/2},${fp.cy+28} ${siteB.x},${siteB.cy}`, { cls:'warn' });
+
+      let fwdTurn = 0;
+      const ctl1 = makeFlow(layer, { spawnMs:1100, make(){
+        fwdTurn++;
+        const blocked = fwdTurn % 3 === 0;
+        const path = [
+          { x:c1.x+c1.w, y:c1.cy },
+          { x:fp.cx, y:fp.cy, dur:550, dwell:140, onArrive:() => pulse(fp.rect) },
+        ];
+        if (blocked) path.push({ x:fp.x+fp.w+36, y:siteB.cy, dur:380, onArrive:() => pulse(siteB.rect) });
+        else path.push({ x:siteA.cx, y:siteA.cy, dur:600, ctrl:{ x:(fp.x+fp.w+siteA.x)/2, y:fp.cy-28 }, onArrive:() => pulse(siteA.rect) });
+        return { path, cls: blocked ? 'bad' : 'ok' };
+      }});
+
+      label(layer, 40, 258, 'REVERSE PROXY · works for the servers', 'title');
+      const u = box(layer, { x:40, y:280, w:150, h:60, label:'User', kind:'client' });
+      const rp = box(layer, { x:330, y:280, w:170, h:60, label:'Reverse proxy', sub:'api.example.com', kind:'proxy' });
+      const srvY = [218, 280, 342];
+      const SV = srvY.map((y, i) => {
+        const b = box(layer, { x:690, y, w:170, h:52, label:'Server ' + (i + 1), kind:'server' });
+        guide(layer, `M${rp.x+rp.w},${rp.cy} Q${(rp.x+rp.w+b.x)/2},${rp.cy+(y-280)*0.5} ${b.x},${b.cy}`);
+        return b;
+      });
+      guide(layer, `M${u.x+u.w},${u.cy} L${rp.x},${rp.cy}`);
+
+      let next = 0;
+      const ctl2 = makeFlow(layer, { spawnMs:850, make(){
+        const target = SV[next]; next = (next + 1) % SV.length;
+        return { path:[
+          { x:u.x+u.w, y:u.cy },
+          { x:rp.cx, y:rp.cy, dur:500, dwell:120, onArrive:() => pulse(rp.rect) },
+          { x:target.cx, y:target.cy, dur:650, ctrl:{ x:(rp.x+rp.w+target.x)/2, y:rp.cy+(target.y-rp.y)*0.3 }, onArrive:() => pulse(target.rect) }
+        ], cls:'ok' };
+      }});
+
+      return {
+        start(){ ctl1.start(); ctl2.start(); },
+        stop(){ ctl1.stop(); ctl2.stop(); },
+        clear(){ ctl1.clear(); ctl2.clear(); }
+      };
+    }
+  };
+}
+
+function sceneApiGateway(){
+  return {
+    label: 'API gateway',
+    viewBox: '0 0 900 480',
+    caption: `One front door for every service: the <strong>API gateway</strong> checks auth and rate limits, then reads the path to pick a service. A rejected request never reaches a service at all — no service has to write its own login check.`,
+    mount(layer){
+      const mob = box(layer, { x:40, y:110, w:150, h:60, label:'Mobile app', kind:'client' });
+      const web = box(layer, { x:40, y:300, w:150, h:60, label:'Website', kind:'client' });
+      const gw = box(layer, { x:330, y:195, w:220, h:90, label:'API Gateway', sub:'auth · rate limit · path', kind:'gateway' });
+      const gwSub = gw.g.querySelector('.box-sub');
+      const movie = box(layer, { x:690, y:40, w:180, h:56, label:'Movie service', sub:'/movies', kind:'server' });
+      const booking = box(layer, { x:690, y:212, w:180, h:56, label:'Booking service', sub:'/bookings', kind:'server' });
+      const payment = box(layer, { x:690, y:384, w:180, h:56, label:'Payment service', sub:'/payments', kind:'server' });
+      guide(layer, `M${mob.x+mob.w},${mob.cy} L${gw.x},${gw.cy-20}`);
+      guide(layer, `M${web.x+web.w},${web.cy} L${gw.x},${gw.cy+20}`);
+      [movie, booking, payment].forEach(s => {
+        guide(layer, `M${gw.x+gw.w},${gw.cy} Q${(gw.x+gw.w+s.x)/2},${gw.cy+(s.cy-gw.cy)*0.4} ${s.x},${s.cy}`);
+      });
+      let turn = 0;
+      return makeFlow(layer, { spawnMs:1000, make(){
+        const t = turn % 4; turn++;
+        const fromBox = (t === 1 || t === 3) ? web : mob;
+        const start = { x:fromBox.x+fromBox.w, y:fromBox.cy };
+        let decision, target, cls;
+        if (t === 0){ decision = '/movies → Movie service'; target = movie; cls = 'ok'; }
+        else if (t === 1){ decision = '/payments → Payment service'; target = payment; cls = 'ok'; }
+        else if (t === 2){ decision = '/bookings → Booking service'; target = booking; cls = 'ok'; }
+        else { decision = 'no token → 401 rejected'; target = null; cls = 'bad'; }
+        const path = [ start, { x:gw.cx, y:gw.cy, dur:550, dwell:170, onArrive:() => { pulse(gw.rect); gwSub.textContent = decision; } } ];
+        if (target) path.push({ x:target.cx, y:target.cy, dur:650, ctrl:{ x:(gw.x+gw.w+target.x)/2, y:gw.cy+(target.cy-gw.cy)*0.4 }, onArrive:() => pulse(target.rect) });
+        else path.push({ x:gw.x+gw.w+34, y:gw.cy, dur:320 });
+        return { path, cls };
+      }});
+    }
+  };
+}
+
+function sceneFlow(){
+  return {
+    label: 'Full flow',
+    viewBox: '0 0 1000 420',
+    caption: `One request, four middlemen, each with one job: <strong>forward proxy</strong> hides the client, <strong>reverse proxy</strong> hides the servers, <strong>API gateway</strong> picks the service, <strong>load balancer</strong> picks the copy.`,
+    mount(layer){
+      const steps = [
+        { x:10,  w:110, label:'Laptop',        sub:'10.0.0.5',      kind:'client' },
+        { x:150, w:140, label:'Forward proxy', sub:'hides client',  kind:'proxy' },
+        { x:320, w:140, label:'Reverse proxy', sub:'hides servers', kind:'proxy' },
+        { x:490, w:140, label:'API gateway',   sub:'which service?',kind:'gateway' },
+        { x:660, w:140, label:'Load balancer', sub:'which copy?',   kind:'lb' },
+      ];
+      const B = steps.map(s => box(layer, { x:s.x, y:160, w:s.w, h:70, label:s.label, sub:s.sub, kind:s.kind }));
+      for (let i = 0; i < B.length - 1; i++) guide(layer, `M${B[i].x+B[i].w},${B[i].cy} L${B[i+1].x},${B[i+1].cy}`);
+      const srvY = [70, 195, 320];
+      const SV = srvY.map((y, i) => {
+        const b = box(layer, { x:880, y, w:100, h:50, label:'Copy ' + (i + 1), kind:'server' });
+        guide(layer, `M${B[4].x+B[4].w},${B[4].cy} Q${(B[4].x+B[4].w+b.x)/2},${B[4].cy+(b.cy-B[4].cy)*0.4} ${b.x},${b.cy}`);
+        return b;
+      });
+      const status = label(layer, 500, 400, 'watching the request travel…', 'strong');
+      const notes = ['forward proxy — hides the client', 'reverse proxy — hides the servers', 'api gateway — which service?', 'load balancer — which copy?'];
+
+      let next = 0;
+      return makeFlow(layer, { spawnMs:1500, make(){
+        const target = SV[next]; next = (next + 1) % SV.length;
+        const path = [ { x:B[0].x+B[0].w, y:B[0].cy } ];
+        for (let i = 1; i < B.length; i++){
+          path.push({ x:B[i].cx, y:B[i].cy, dur:480, dwell:150, onArrive:() => { pulse(B[i].rect); status.textContent = notes[i-1]; } });
+        }
+        path.push({ x:target.cx, y:target.cy, dur:600, ctrl:{ x:(B[4].x+B[4].w+target.x)/2, y:B[4].cy+(target.cy-B[4].cy)*0.4 }, onArrive:() => { pulse(target.rect); status.textContent = 'server — does the real work'; } });
+        return { path, cls:'ok' };
+      }});
+    }
+  };
+}
+
+// A scripted, looping sequence for one token — used where the story is a fixed narrative
+// (write then replicate, or a partition then two different responses) rather than an ambient stream.
+function scriptPlayer(layer, steps, { loopPause = 1000 } = {}){
+  let raf = null, timer = null, running = false, tokenEl = null, i = 0;
+
+  function playStep(){
+    if (!running) return;
+    const s = steps[i];
+    if (tokenEl) tokenEl.remove();
+    tokenEl = el('circle', { cx:s.from.x, cy:s.from.y, r:7, class:'token ' + (s.cls || '') });
+    layer.appendChild(tokenEl);
+    const t0 = performance.now(), dur = s.dur || 700;
+    function animate(now){
+      if (!running) return;
+      const t = Math.min(1, (now - t0) / dur);
+      const e = easeInOutQuad(t);
+      const p = s.ctrl ? quad(s.from, s.ctrl, s.to, e) : { x:s.from.x+(s.to.x-s.from.x)*e, y:s.from.y+(s.to.y-s.from.y)*e };
+      tokenEl.setAttribute('cx', p.x.toFixed(1));
+      tokenEl.setAttribute('cy', p.y.toFixed(1));
+      if (t < 1){ raf = requestAnimationFrame(animate); return; }
+      if (s.onArrive) s.onArrive();
+      i++;
+      if (i >= steps.length){
+        i = 0;
+        timer = setTimeout(() => { if (tokenEl){ tokenEl.remove(); tokenEl = null; } playStep(); }, loopPause);
+      } else {
+        timer = setTimeout(playStep, s.holdMs || 650);
+      }
+    }
+    raf = requestAnimationFrame(animate);
+  }
+
+  return {
+    start(){ if (running) return; running = true; playStep(); },
+    stop(){ running = false; if (raf) cancelAnimationFrame(raf); if (timer) clearTimeout(timer); },
+    clear(){ if (tokenEl){ tokenEl.remove(); tokenEl = null; } i = 0; }
+  };
+}
+
+function sceneReplicas(){
+  return {
+    label: 'Read replicas',
+    viewBox: '0 0 900 460',
+    caption: `Writes go to the <strong>primary</strong> only; it copies every change to its <strong>replicas</strong>, so reads can be spread across them. That copying takes a moment — <strong>replication lag</strong> — so a replica can briefly answer with slightly old data.`,
+    mount(layer){
+      const app = box(layer, { x:30, y:200, w:160, h:70, label:'App server', sub:'handles users', kind:'client' });
+      const pri = box(layer, { x:330, y:200, w:200, h:70, label:'Primary DB', sub:'writes land here', kind:'db' });
+      const r1 = box(layer, { x:690, y:90, w:180, h:60, label:'Replica 1', sub:'reads only', kind:'db' });
+      const r2 = box(layer, { x:690, y:310, w:180, h:60, label:'Replica 2', sub:'reads only', kind:'db' });
+      guide(layer, `M${app.x+app.w},${app.cy} L${pri.x},${pri.cy}`);
+      guide(layer, `M${app.x+app.w},${app.cy} Q${(app.x+app.w+r1.x)/2},${app.cy-80} ${r1.x},${r1.cy}`, { cls:'dashed' });
+      guide(layer, `M${app.x+app.w},${app.cy} Q${(app.x+app.w+r2.x)/2},${app.cy+80} ${r2.x},${r2.cy}`, { cls:'dashed' });
+      guide(layer, `M${pri.x+pri.w},${pri.cy} Q${(pri.x+pri.w+r1.x)/2},${pri.cy-60} ${r1.x},${r1.cy}`);
+      guide(layer, `M${pri.x+pri.w},${pri.cy} Q${(pri.x+pri.w+r2.x)/2},${pri.cy+60} ${r2.x},${r2.cy}`);
+      const priSub = pri.g.querySelector('.box-sub');
+
+      const writeFlow = makeFlow(layer, { spawnMs:2600, make(){
+        return { path:[
+          { x:app.x+app.w, y:app.cy },
+          { x:pri.cx, y:pri.cy, dur:550, dwell:200, onArrive:() => {
+            pulse(pri.rect); priSub.textContent = 'replicating…';
+            [r1, r2].forEach(r => {
+              writeFlow.fire([
+                { x:pri.cx, y:pri.cy },
+                { x:pri.cx, y:pri.cy, dur:1, dwell:900 },
+                { x:r.cx, y:r.cy, dur:650, ctrl:{ x:(pri.x+pri.w+r.x)/2, y:pri.cy+(r.cy-pri.cy)*0.5 }, onArrive:() => {
+                  pulse(r.rect); priSub.textContent = 'writes land here';
+                } }
+              ], 'alt');
+            });
+          } }
+        ], cls:'ok' };
+      }});
+
+      let next = 0;
+      const readFlow = makeFlow(layer, { spawnMs:1100, make(){
+        const target = next === 0 ? r1 : r2; next = 1 - next;
+        return { path:[
+          { x:app.x+app.w, y:app.cy },
+          { x:target.cx, y:target.cy, dur:650, ctrl:{ x:(app.x+app.w+target.x)/2, y:app.cy+(target.cy-app.cy)*0.5 }, onArrive:() => pulse(target.rect) }
+        ], cls:'ok' };
+      }});
+
+      return {
+        start(){ writeFlow.start(); readFlow.start(); },
+        stop(){ writeFlow.stop(); readFlow.stop(); },
+        clear(){ writeFlow.clear(); readFlow.clear(); }
+      };
+    }
+  };
+}
+
+function sceneStateless(){
+  return {
+    label: 'Stateless',
+    viewBox: '0 0 1000 480',
+    caption: `A session kept in one server's memory breaks load balancing: only that server remembers the user. <strong>Sticky sessions</strong> pin a user to one server — fragile, since that server dying loses the session. A <strong>shared session store</strong> lets any server answer, because none of them hold the session themselves.`,
+    mount(layer){
+      const user = box(layer, { x:30, y:210, w:150, h:60, label:'User', kind:'client' });
+      const lb = box(layer, { x:250, y:210, w:160, h:60, label:'Load balancer', sub:'round robin', kind:'lb' });
+      const srvY = [90, 210, 330];
+      const SV = srvY.map((y, i) => {
+        const b = box(layer, { x:560, y, w:170, h:60, label:'Server ' + String.fromCharCode(65 + i), sub:'memory: empty', kind:'server' });
+        guide(layer, `M${lb.x+lb.w},${lb.cy} Q${(lb.x+lb.w+b.x)/2},${lb.cy+(b.cy-lb.cy)*0.4} ${b.x},${b.cy}`);
+        return b;
+      });
+      guide(layer, `M${user.x+user.w},${user.cy} L${lb.x},${lb.cy}`);
+      const store = box(layer, { x:830, y:210, w:150, h:60, label:'Session store', sub:'Redis', kind:'db' });
+      const storeLinks = SV.map(s => {
+        const g = guide(layer, `M${s.x+s.w},${s.cy} L${store.x},${store.cy}`, { arrow:false });
+        g.style.opacity = .15;
+        return g;
+      });
+
+      let mode = 'sticky';
+      const ctlBox = document.getElementById('extraCtl');
+      ctlBox.innerHTML = `<button data-m="sticky" class="on">Sticky sessions</button><button data-m="store">Shared session store</button>`;
+      function setMode(m){
+        mode = m;
+        ctlBox.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+        SV.forEach(s => { s.g.querySelector('.box-sub').textContent = 'memory: empty'; });
+        storeLinks.forEach(l => { l.style.opacity = m === 'store' ? .35 : .12; });
+      }
+      ctlBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
+      setMode('sticky');
+
+      let next = 0;
+      const flow = makeFlow(layer, { spawnMs:1000, make(){
+        const target = mode === 'sticky' ? SV[0] : SV[next];
+        if (mode !== 'sticky') next = (next + 1) % SV.length;
+        return { path:[
+          { x:user.x+user.w, y:user.cy },
+          { x:lb.cx, y:lb.cy, dur:420, dwell:110, onArrive:() => pulse(lb.rect) },
+          { x:target.cx, y:target.cy, dur:600, ctrl:{ x:(lb.x+lb.w+target.x)/2, y:lb.cy+(target.cy-lb.cy)*0.4 }, onArrive:() => {
+            pulse(target.rect);
+            if (mode === 'sticky'){ target.g.querySelector('.box-sub').textContent = 'memory: zoya ✓'; }
+            else {
+              flow.fire([
+                { x:target.cx, y:target.cy },
+                { x:store.cx, y:store.cy, dur:360, onArrive:() => pulse(store.rect) },
+                { x:target.cx, y:target.cy, dur:360, onArrive:() => { target.g.querySelector('.box-sub').textContent = 'checked store ✓'; } }
+              ], 'alt', 5);
+            }
+          } }
+        ], cls:'ok' };
+      }});
+      return flow;
+    }
+  };
+}
+
+const CAP_DOMAINS = [
+  {
+    id:'seat', label:'Seat booking',
+    who1:'Zoya', who2:'Aman', place1:'Mumbai', place2:'Delhi',
+    initial:'seat A7: FREE',
+    booked: who => `seat A7: BOOKED (${who})`,
+    conflictMsg:'⚠ sold twice — copies disagree', conflictBad:true,
+    refuseMsg:"refused — can't confirm",
+    why:"Seat booking: wrong data is worse than an error. Nobody wants two people holding the same seat, so this picks CP."
+  },
+  {
+    id:'bank', label:'Bank withdrawal',
+    who1:'ATM · Pune', who2:'ATM · Delhi', place1:'Pune', place2:'Delhi',
+    initial:'acct #4471: ₹500',
+    booked: who => `₹0 left (paid at ${who})`,
+    conflictMsg:'⚠ ₹1,000 paid out of a ₹500 balance', conflictBad:true,
+    refuseMsg:'declined — try another ATM',
+    why:"Money: an overdrawn account is a real loss, not a minor glitch. Banks choose CP (or queue the write) over paying out twice."
+  },
+  {
+    id:'likes', label:'Like counter',
+    who1:'Reader 1', who2:'Reader 2', place1:'US cache', place2:'EU cache',
+    initial:'post likes: 0',
+    booked: who => `+1 like (${who})`,
+    conflictMsg:'merge later: 2 likes counted — nobody notices', conflictBad:false,
+    refuseMsg:'declined — try again later',
+    why:"A like count being briefly wrong costs nothing. Refusing to count it (CP) would be the overreaction — this is where AP wins."
+  },
+];
+
+function sceneCap(){
+  return {
+    label: 'CAP theorem',
+    viewBox: '0 0 1000 420',
+    caption: `When the link between database copies breaks (a <strong>partition</strong>), each copy must choose: refuse to answer and stay correct (<strong>CP</strong>), or answer anyway and risk disagreeing with the other copy (<strong>AP</strong>). The right choice depends on what the data is — switch the scenario below to see why.`,
+    mount(layer){
+      const zoya = box(layer, { x:20, y:170, w:150, h:60, label:'—', kind:'client' });
+      const mum = box(layer, { x:230, y:160, w:200, h:80, label:'—', sub:'—', kind:'db' });
+      const del = box(layer, { x:570, y:160, w:200, h:80, label:'—', sub:'—', kind:'db' });
+      const aman = box(layer, { x:830, y:170, w:150, h:60, label:'—', kind:'client' });
+      const link = guide(layer, `M${mum.x+mum.w},${mum.cy} L${del.x},${del.cy}`, { arrow:false });
+      guide(layer, `M${zoya.x+zoya.w},${zoya.cy} L${mum.x},${mum.cy}`);
+      guide(layer, `M${aman.x},${aman.cy} L${del.x+del.w},${del.cy}`);
+      const linkLbl = label(layer, (mum.x+mum.w+del.x)/2, mum.cy-16, 'sync link');
+      const conflict = label(layer, (mum.x+mum.w+del.x)/2, mum.cy+32, '', 'strong');
+      conflict.style.fill = 'var(--bad)';
+      const why = label(layer, 500, 396, '');
+
+      const zoyaLabel = zoya.g.querySelector('.box-label');
+      const amanLabel = aman.g.querySelector('.box-label');
+      const mumLabel = mum.g.querySelector('.box-label');
+      const delLabel = del.g.querySelector('.box-label');
+      const mumSub = mum.g.querySelector('.box-sub');
+      const delSub = del.g.querySelector('.box-sub');
+
+      let mode = 'ok', domainIdx = 0;
+      const ctlBox = document.getElementById('extraCtl');
+      ctlBox.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;width:100%">${CAP_DOMAINS.map((d,i)=>`<button data-d="${i}" class="${i===0?'on':''}">${d.label}</button>`).join('')}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;width:100%;margin-top:6px">
+          <button data-m="ok" class="on">Network OK</button><button data-m="cp">Partition · CP (refuse)</button><button data-m="ap">Partition · AP (stale)</button>
+        </div>`;
+
+      function domain(){ return CAP_DOMAINS[domainIdx]; }
+
+      function applyLabels(){
+        const d = domain();
+        zoyaLabel.textContent = d.who1; amanLabel.textContent = d.who2;
+        mumLabel.textContent = 'Copy — ' + d.place1; delLabel.textContent = 'Copy — ' + d.place2;
+        why.textContent = d.why;
+      }
+
+      function reset(){
+        const d = domain();
+        mumSub.textContent = d.initial;
+        delSub.textContent = d.initial;
+        conflict.textContent = '';
+        link.classList.toggle('warn', mode !== 'ok');
+        linkLbl.textContent = mode === 'ok' ? 'sync link' : 'sync link — broken';
+      }
+
+      function buildSteps(){
+        const d = domain();
+        const zoyaToMum = { from:{ x:zoya.x+zoya.w, y:zoya.cy }, to:{ x:mum.cx, y:mum.cy }, dur:600, cls:'ok', holdMs:500,
+          onArrive:() => { pulse(mum.rect); mumSub.textContent = d.booked(d.who1); } };
+        if (mode === 'ok'){
+          return [
+            zoyaToMum,
+            { from:{ x:mum.cx, y:mum.cy }, to:{ x:del.cx, y:del.cy }, dur:550, cls:'alt', holdMs:450,
+              onArrive:() => { pulse(del.rect); delSub.textContent = d.booked(d.who1); } },
+            { from:{ x:aman.x, y:aman.cy }, to:{ x:del.cx, y:del.cy }, dur:600, cls:'ok', holdMs:900,
+              onArrive:() => pulse(del.rect) },
+          ];
+        }
+        if (mode === 'cp'){
+          return [
+            zoyaToMum,
+            { from:{ x:mum.cx, y:mum.cy }, to:{ x:(mum.x+mum.w+del.x)/2, y:mum.cy }, dur:450, cls:'bad', holdMs:350,
+              onArrive:() => { conflict.textContent = 'sync lost'; } },
+            { from:{ x:aman.x, y:aman.cy }, to:{ x:del.cx, y:del.cy }, dur:600, cls:'ok', holdMs:450,
+              onArrive:() => pulse(del.rect) },
+            { from:{ x:del.cx, y:del.cy }, to:{ x:aman.x, y:aman.cy }, dur:600, cls:'bad', holdMs:900,
+              onArrive:() => { delSub.textContent = d.refuseMsg; conflict.textContent = ''; } },
+          ];
+        }
+        return [
+          zoyaToMum,
+          { from:{ x:mum.cx, y:mum.cy }, to:{ x:(mum.x+mum.w+del.x)/2, y:mum.cy }, dur:450, cls:'bad', holdMs:350,
+            onArrive:() => { conflict.textContent = 'sync lost'; } },
+          { from:{ x:aman.x, y:aman.cy }, to:{ x:del.cx, y:del.cy }, dur:600, cls:'ok', holdMs:450,
+            onArrive:() => { pulse(del.rect); delSub.textContent = d.booked(d.who2); } },
+          { from:{ x:del.cx, y:del.cy }, to:{ x:aman.x, y:aman.cy }, dur:500, cls: d.conflictBad ? 'ok' : 'ok', holdMs:900,
+            onArrive:() => { conflict.textContent = d.conflictMsg; conflict.style.fill = d.conflictBad ? 'var(--bad)' : 'var(--accent-2)'; } },
+        ];
+      }
+
+      let player = null;
+      function rebuild(){
+        if (player) player.stop();
+        applyLabels();
+        reset();
+        player = scriptPlayer(layer, buildSteps(), { loopPause:1300 });
+        player.start();
+      }
+
+      ctlBox.querySelectorAll('[data-m]').forEach(b => b.addEventListener('click', () => {
+        mode = b.dataset.m;
+        ctlBox.querySelectorAll('[data-m]').forEach(x => x.classList.toggle('on', x === b));
+        rebuild();
+      }));
+      ctlBox.querySelectorAll('[data-d]').forEach(b => b.addEventListener('click', () => {
+        domainIdx = +b.dataset.d;
+        ctlBox.querySelectorAll('[data-d]').forEach(x => x.classList.toggle('on', x === b));
+        rebuild();
+      }));
+
+      applyLabels();
+      reset();
+      player = scriptPlayer(layer, buildSteps(), { loopPause:1300 });
+      return {
+        start(){ player.start(); },
+        stop(){ player.stop(); },
+        clear(){ player.clear(); }
+      };
+    }
+  };
+}
+
+function sceneMonolith(){
+  return {
+    label: 'Monolith → split',
+    viewBox: '0 0 900 460',
+    caption: `One app, one database is simple — until it isn't: one bug can take everything down, you can't scale just the busy part, and large teams collide in the same codebase. Splitting by business area fixes that, at the cost of network calls between services instead of function calls, and no more joins across their databases.`,
+    mount(layer){
+      const ctlBox = document.getElementById('extraCtl');
+      ctlBox.innerHTML = `<button data-m="mono" class="on">Monolith</button><button data-m="split">Split into services</button>`;
+      let mode = 'mono', flow = null;
+
+      function build(){
+        layer.innerHTML = '';
+        const user = box(layer, { x:30, y:200, w:140, h:60, label:'User', kind:'client' });
+        if (mode === 'mono'){
+          const app = box(layer, { x:300, y:150, w:260, h:140, label:'BookMyShow App', sub:'movies · booking · payment', kind:'server' });
+          const db = box(layer, { x:650, y:200, w:180, h:60, label:'Database', sub:'one for everything', kind:'db' });
+          guide(layer, `M${user.x+user.w},${user.cy} L${app.x},${app.cy}`);
+          guide(layer, `M${app.x+app.w},${app.cy} L${db.x},${db.cy}`);
+          flow = makeFlow(layer, { spawnMs:900, make(){
+            return { path:[
+              { x:user.x+user.w, y:user.cy },
+              { x:app.cx, y:app.cy, dur:500, dwell:130, onArrive:() => pulse(app.rect) },
+              { x:db.cx, y:db.cy, dur:450, onArrive:() => pulse(db.rect) }
+            ], cls:'ok' };
+          }});
+        } else {
+          const rows = [ { y:50, name:'Movie service' }, { y:195, name:'Booking service' }, { y:340, name:'Payment service' } ];
+          const SV = rows.map(r => {
+            const svc = box(layer, { x:300, y:r.y, w:180, h:60, label:r.name, kind:'server' });
+            const db = box(layer, { x:560, y:r.y+2, w:150, h:56, label:'DB', sub:'own data', kind:'db' });
+            guide(layer, `M${svc.x+svc.w},${svc.cy} L${db.x},${db.cy}`);
+            guide(layer, `M${user.x+user.w},${user.cy} Q${(user.x+user.w+svc.x)/2},${user.cy+(svc.cy-user.cy)*0.5} ${svc.x},${svc.cy}`);
+            return { svc, db };
+          });
+          guide(layer, `M${SV[1].svc.cx},${SV[1].svc.y} L${SV[2].svc.cx},${SV[2].svc.y+SV[2].svc.h}`, { cls:'dashed', arrow:false });
+          let next = 0;
+          flow = makeFlow(layer, { spawnMs:750, make(){
+            const t = SV[next]; next = (next + 1) % SV.length;
+            return { path:[
+              { x:user.x+user.w, y:user.cy },
+              { x:t.svc.cx, y:t.svc.cy, dur:550, ctrl:{ x:(user.x+user.w+t.svc.x)/2, y:user.cy+(t.svc.cy-user.cy)*0.5 }, dwell:110, onArrive:() => pulse(t.svc.rect) },
+              { x:t.db.cx, y:t.db.cy, dur:350, onArrive:() => pulse(t.db.rect) }
+            ], cls:'ok' };
+          }});
+        }
+      }
+
+      ctlBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        mode = b.dataset.m;
+        ctlBox.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        if (flow) flow.stop();
+        build();
+        flow.start();
+      }));
+
+      build();
+      return {
+        start(){ flow.start(); },
+        stop(){ if (flow) flow.stop(); },
+        clear(){ if (flow) flow.clear(); }
+      };
+    }
+  };
+}
+
+function sceneScaling(){
+  return {
+    label: 'Scaling',
+    viewBox: '0 0 900 420',
+    caption: `<strong>Vertical scaling</strong>: a bigger machine — more CPU and RAM — but it's still one box, so there's a ceiling and a single point of failure. <strong>Horizontal scaling</strong>: more copies of the same server — no ceiling, but now something has to sit in front and share the traffic between them.`,
+    mount(layer){
+      const ctlBox = document.getElementById('extraCtl');
+      ctlBox.innerHTML = `<button data-m="v" class="on">Vertical</button><button data-m="h">Horizontal</button>`;
+      let mode = 'v', flow = null;
+
+      function build(){
+        layer.innerHTML = '';
+        const user = box(layer, { x:40, y:180, w:150, h:60, label:'User traffic', kind:'client' });
+        if (mode === 'v'){
+          const srv = box(layer, { x:360, y:120, w:280, h:180, label:'Bigger machine', sub:'more CPU · more RAM', kind:'server' });
+          guide(layer, `M${user.x+user.w},${user.cy} L${srv.x},${srv.cy}`);
+          flow = makeFlow(layer, { spawnMs:650, make(){
+            return { path:[
+              { x:user.x+user.w, y:user.cy },
+              { x:srv.cx, y:srv.cy, dur:500, onArrive:() => pulse(srv.rect) }
+            ], cls:'ok' };
+          }});
+        } else {
+          const lb = box(layer, { x:320, y:180, w:150, h:60, label:'Load balancer', kind:'lb' });
+          guide(layer, `M${user.x+user.w},${user.cy} L${lb.x},${lb.cy}`);
+          const srvY = [60, 180, 300];
+          const SV = srvY.map((y, i) => {
+            const s = box(layer, { x:620, y, w:180, h:56, label:'Server copy ' + (i + 1), kind:'server' });
+            guide(layer, `M${lb.x+lb.w},${lb.cy} Q${(lb.x+lb.w+s.x)/2},${lb.cy+(s.cy-lb.cy)*0.4} ${s.x},${s.cy}`);
+            return s;
+          });
+          let next = 0;
+          flow = makeFlow(layer, { spawnMs:650, make(){
+            const t = SV[next]; next = (next + 1) % SV.length;
+            return { path:[
+              { x:user.x+user.w, y:user.cy },
+              { x:lb.cx, y:lb.cy, dur:400, dwell:100, onArrive:() => pulse(lb.rect) },
+              { x:t.cx, y:t.cy, dur:500, ctrl:{ x:(lb.x+lb.w+t.x)/2, y:lb.cy+(t.cy-lb.cy)*0.4 }, onArrive:() => pulse(t.rect) }
+            ], cls:'ok' };
+          }});
+        }
+      }
+
+      ctlBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        mode = b.dataset.m;
+        ctlBox.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        if (flow) flow.stop();
+        build();
+        flow.start();
+      }));
+
+      build();
+      return {
+        start(){ flow.start(); },
+        stop(){ if (flow) flow.stop(); },
+        clear(){ if (flow) flow.clear(); }
+      };
+    }
+  };
+}
+
+function sceneRateLimit(){
+  return {
+    label: 'Rate limiting',
+    viewBox: '0 0 900 460',
+    caption: `A <strong>token bucket</strong>: every request costs one token, and the bucket refills slowly over time. Once it's empty, new requests get a fast <strong>429</strong> instead of queueing up and overwhelming the service. This usually lives at the <strong>API gateway</strong>, applied per user or per API key — watch the bucket drain, then refill.`,
+    mount(layer){
+      const client = box(layer, { x:30, y:205, w:150, h:60, label:'Client', kind:'client' });
+      const gwX = 320, gwY = 110, gwW = 240, gwH = 250;
+      const gwRect = el('rect', { x:gwX, y:gwY, width:gwW, height:gwH, rx:14, class:'box gateway' });
+      layer.appendChild(gwRect);
+      const gw = { rect:gwRect, x:gwX, y:gwY, w:gwW, h:gwH, cx:gwX+gwW/2, cy:gwY+gwH/2 };
+      const t1 = el('text', { x:gw.cx, y:gwY+34, class:'box-label', 'text-anchor':'middle' }); t1.textContent = 'API Gateway'; layer.appendChild(t1);
+      const t2 = el('text', { x:gw.cx, y:gwY+54, class:'box-sub', 'text-anchor':'middle' }); t2.textContent = 'rate limiter'; layer.appendChild(t2);
+      const svc = box(layer, { x:690, y:205, w:180, h:60, label:'Service', kind:'server' });
+      guide(layer, `M${client.x+client.w},${client.cy} L${gw.x},${gw.cy}`);
+      guide(layer, `M${gw.x+gw.w},${gw.cy} L${svc.x},${svc.cy}`);
+
+      const MAX = 5;
+      let tokens = MAX;
+      label(layer, gw.cx, gwY+86, 'tokens');
+      const trackX = gw.cx - 16, trackY = gwY + 96, trackH = 90, trackW = 32;
+      layer.appendChild(el('rect', { x:trackX, y:trackY, width:trackW, height:trackH, rx:6, fill:'var(--track)' }));
+      const fill = el('rect', { x:trackX, y:trackY, width:trackW, height:trackH, rx:6, fill:'var(--accent-2)' });
+      layer.appendChild(fill);
+      const tokLabel = el('text', { x:gw.cx, y:trackY + trackH + 26, class:'stat-num' });
+      layer.appendChild(tokLabel);
+
+      function paintBucket(){
+        const h = trackH * (tokens / MAX);
+        fill.setAttribute('y', trackY + trackH - h);
+        fill.setAttribute('height', h);
+        tokLabel.textContent = tokens + ' / ' + MAX;
+      }
+      paintBucket();
+
+      let refillTimer = null;
+      function startRefill(){ refillTimer = setInterval(() => { tokens = Math.min(MAX, tokens + 1); paintBucket(); }, 1500); }
+      function stopRefill(){ if (refillTimer) clearInterval(refillTimer); refillTimer = null; }
+
+      const flow = makeFlow(layer, { spawnMs:500, make(){
+        const allowed = tokens > 0;
+        if (allowed) tokens--;
+        paintBucket();
+        const path = [
+          { x:client.x+client.w, y:client.cy },
+          { x:gw.cx, y:gw.cy, dur:420, dwell:90, onArrive:() => pulse(gw.rect) },
+        ];
+        if (allowed) path.push({ x:svc.cx, y:svc.cy, dur:420, onArrive:() => pulse(svc.rect) });
+        else path.push({ x:gw.x+gw.w-24, y:gw.cy+70, dur:300, onArrive:() => pulse(gw.rect) });
+        return { path, cls: allowed ? 'ok' : 'bad' };
+      }});
+
+      return {
+        start(){ flow.start(); startRefill(); },
+        stop(){ flow.stop(); stopRefill(); },
+        clear(){ flow.clear(); }
+      };
+    }
+  };
+}
+
+function sceneCircuitBreaker(){
+  return {
+    label: 'Circuit breaker',
+    viewBox: '0 0 900 420',
+    caption: `A <strong>circuit breaker</strong> watches calls to a downstream service. After enough failures in a row it <strong>trips open</strong>: new requests fail instantly without even calling the dying service, giving it room to recover. After a cooldown it lets one <strong>trial</strong> request through — success closes the breaker again, failure re-opens it. Toggle the downstream service below.`,
+    mount(layer){
+      const client = box(layer, { x:30, y:200, w:140, h:60, label:'Client', kind:'client' });
+      const brk = box(layer, { x:300, y:160, w:220, h:140, label:'Circuit Breaker', sub:'CLOSED · 0/3 failures', kind:'lb' });
+      const brkSub = brk.g.querySelector('.box-sub');
+      const svc = box(layer, { x:660, y:200, w:180, h:60, label:'Payment service', kind:'server' });
+      guide(layer, `M${client.x+client.w},${client.cy} L${brk.x},${brk.cy}`);
+      guide(layer, `M${brk.x+brk.w},${brk.cy} L${svc.x},${svc.cy}`);
+
+      const ctlBox = document.getElementById('extraCtl');
+      ctlBox.innerHTML = `<button data-h="1" class="on">Downstream: healthy</button><button data-h="0">Downstream: failing</button>`;
+      let healthy = true;
+      ctlBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        healthy = b.dataset.h === '1';
+        ctlBox.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+      }));
+
+      const THRESHOLD = 3, OPEN_MS = 4000;
+      let state = 'closed', failCount = 0, openedAt = 0, trialInFlight = false;
+
+      function setState(s){
+        state = s;
+        brk.rect.classList.remove('bad');
+        if (s === 'open') brk.rect.classList.add('bad');
+      }
+
+      function updateSub(){
+        if (state === 'closed') brkSub.textContent = `CLOSED · ${failCount}/${THRESHOLD} failures`;
+        else if (state === 'open'){
+          const left = Math.max(0, Math.ceil((OPEN_MS - (performance.now() - openedAt)) / 1000));
+          brkSub.textContent = `OPEN · retry in ${left}s`;
+        } else brkSub.textContent = 'HALF-OPEN · trial request';
+      }
+
+      const watcher = setInterval(() => {
+        if (state === 'open' && performance.now() - openedAt >= OPEN_MS){ setState('half-open'); trialInFlight = false; }
+        updateSub();
+      }, 300);
+
+      const flow = makeFlow(layer, { spawnMs:700, make(){
+        if (state === 'open' || (state === 'half-open' && trialInFlight)){
+          return { path:[
+            { x:client.x+client.w, y:client.cy },
+            { x:brk.cx, y:brk.cy, dur:380, dwell:80, onArrive:() => pulse(brk.rect) },
+            { x:brk.cx+40, y:brk.cy+40, dur:260 }
+          ], cls:'bad' };
+        }
+        const isTrial = state === 'half-open';
+        if (isTrial) trialInFlight = true;
+        return { path:[
+          { x:client.x+client.w, y:client.cy },
+          { x:brk.cx, y:brk.cy, dur:380, dwell:80, onArrive:() => pulse(brk.rect) },
+          { x:svc.cx, y:svc.cy, dur:420, onArrive:() => {
+            pulse(svc.rect);
+            if (healthy){
+              failCount = 0;
+              if (isTrial){ setState('closed'); trialInFlight = false; }
+            } else {
+              failCount++;
+              if (isTrial){ setState('open'); openedAt = performance.now(); trialInFlight = false; }
+              else if (failCount >= THRESHOLD){ setState('open'); openedAt = performance.now(); }
+            }
+            updateSub();
+          } }
+        ], cls: healthy ? 'ok' : 'bad' };
+      }});
+
+      return {
+        start(){ flow.start(); },
+        stop(){ flow.stop(); },
+        clear(){ flow.clear(); clearInterval(watcher); }
+      };
+    }
+  };
+}
+
+SCENES.push(sceneMonolith());
+SCENES.push(sceneScaling());
+SCENES.push(sceneLoadBalancer());
+SCENES.push(sceneProxies());
+SCENES.push(sceneApiGateway());
+SCENES.push(sceneRateLimit());
+SCENES.push(sceneCircuitBreaker());
+SCENES.push(sceneFlow());
+SCENES.push(sceneReplicas());
+SCENES.push(sceneStateless());
+SCENES.push(sceneCap());
+
+buildTabs();
+mountScene(SCENES[0]);
+</script>
+</body>
+</html>

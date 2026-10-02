@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read Replicas</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Read replicas and replication lag</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a class="on" href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(500);
+const BASE = ['Nice songs (Aman)', 'Too long (Riya)', 'Loved it (Om)'];
+let D;
+
+function dbHTML(k) {
+  const d = D[k];
+  return `<div class="items">${d.items.slice(-3).map(t => `<div class="${t === d.fresh ? 'new' : ''}">${t}</div>`).join('')}</div>
+    <div style="margin-top: 4px">${d.items.length} reviews</div>`;
+}
+function paintDB(k) { Net.set(k, { body: dbHTML(k) }); }
+function addTo(k, text) { D[k].items.push(text); D[k].fresh = text; paintDB(k); }
+
+function setup() {
+  D = { pri: { items: BASE.slice() }, r1: { items: BASE.slice() }, r2: { items: BASE.slice() } };
+  Net.node('app', { x: 130, y: 250, label: 'App server', sub: 'handles users', w: 160 });
+  Net.node('pri', { x: 480, y: 250, label: 'Primary DB', sub: 'all writes go here', kind: 'db', w: 220, body: dbHTML('pri') });
+  Net.node('r1', { x: 840, y: 125, label: 'Replica 1', sub: 'reads only', kind: 'db', w: 220, body: dbHTML('r1') });
+  Net.node('r2', { x: 840, y: 375, label: 'Replica 2', sub: 'reads only', kind: 'db', w: 220, body: dbHTML('r2') });
+  Net.link('app', 'pri', { label: 'writes' });
+  Net.link('app', 'r1', { dashed: true, label: 'reads' });
+  Net.link('app', 'r2', { dashed: true, label: 'reads' });
+  Net.link('pri', 'r1', { dashed: true, label: 'copies changes' });
+  Net.link('pri', 'r2', { dashed: true, label: 'copies changes' });
+}
+
+async function write(ctx, to, text) {
+  await Net.send('app', to, { label: 'INSERT review' }); Net.check(ctx);
+  addTo(to, text);
+  Net.flash(to, 'ok');
+}
+
+async function copy(ctx, from, to, text, dur, lost) {
+  await Net.send(from, to, { label: 'copy: new review', cls: 'amber', dur, stopAt: lost ? 0.45 : 1 }); Net.check(ctx);
+  if (lost) return;
+  addTo(to, text);
+}
+
+async function read(ctx, from, who, want) {
+  await Net.send('app', from, { label: 'SELECT reviews' + (who ? ` (${who})` : '') }); Net.check(ctx);
+  const n = D[from].items.length, has = D[from].items.includes(want);
+  const cls = want ? (has ? 'ok' : 'bad') : 'ok';
+  await Net.send(from, 'app', { label: `${n} reviews` + (want ? (has ? ' · hers is there ✓' : ' · hers is missing!') : ''), cls }); Net.check(ctx);
+  return has;
+}
+
+async function runHow(ctx) {
+  const t = 'Great movie! (Zoya)';
+  Net.say('Writes (INSERT, UPDATE, DELETE) go to the <b>primary</b> database only.');
+  await Net.beat(ctx);
+  await write(ctx, 'pri', t);
+  Net.say('The primary then sends every change to its <b>replicas</b>, so they keep an exact copy of the data.');
+  await Promise.all([copy(ctx, 'pri', 'r1', t, 1800), copy(ctx, 'pri', 'r2', t, 2300)]);
+  await Net.beat(ctx);
+  Net.say('Reads can go to <b>any replica</b>, so the reading work is shared between them.');
+  await read(ctx, 'r1', 'Aman');
+  await read(ctx, 'r2', 'Riya');
+  await Net.beat(ctx, 1500);
+  Net.say('Most apps read far more than they write (people browse movies far more than they book). More replicas = more read capacity. Writes still all go to <b>one primary</b>.', 'win');
+}
+
+async function runLag(ctx) {
+  const t = 'Great movie! (Zoya)';
+  Net.say('Zoya posts a review: <b>"Great movie!"</b>');
+  await Net.beat(ctx, 1600);
+  await write(ctx, 'pri', t);
+  Net.say('The database is busy, so copying to the replicas is <b>slow</b> right now. This delay is called <b>replication lag</b>.');
+  const copies = Promise.all([copy(ctx, 'pri', 'r1', t, 9000), copy(ctx, 'pri', 'r2', t, 10000)]);
+  copies.catch(() => {});
+  await Net.wait(ctx, 1500);
+  Net.say('Zoya refreshes the page straight away. Her read goes to <b>Replica 1</b>...');
+  await read(ctx, 'r1', 'Zoya', t);
+  Net.say('<b>Her review is missing!</b> Replica 1 has not received the copy yet. She thinks posting failed, and may post it again.', 'err');
+  await copies;
+  Net.say('A few seconds later, the replicas catch up.');
+  await Net.beat(ctx, 1800);
+  await read(ctx, 'r1', 'Zoya', t);
+  Net.say('Lag is usually milliseconds, but under heavy load it can be seconds. Reading from a replica can mean reading <b>slightly old data</b>.', 'win');
+}
+
+async function runFix(ctx) {
+  const t = 'Great movie! (Zoya)';
+  Net.say('Same situation, with a fix called <b>read your own writes</b>.');
+  await Net.beat(ctx, 1800);
+  await write(ctx, 'pri', t);
+  const copies = Promise.all([copy(ctx, 'pri', 'r1', t, 9000), copy(ctx, 'pri', 'r2', t, 10000)]);
+  copies.catch(() => {});
+  Net.set('app', { sub: 'Zoya just wrote → her reads go to primary' });
+  Net.say('The app remembers that <b>Zoya just wrote something</b>. For the next few seconds, <b>her</b> reads go to the primary.');
+  await Net.beat(ctx);
+  await read(ctx, 'pri', 'Zoya', t);
+  Net.say('She sees her own review immediately.', 'win');
+  await Net.beat(ctx);
+  Net.say('Aman\'s read still goes to a replica, which is still behind...');
+  await read(ctx, 'r2', 'Aman');
+  Net.say('He does not see the new review for a second, and that is fine: he does not know it exists yet.');
+  await copies;
+  await Net.beat(ctx, 1500);
+  Net.say('Users always see <b>their own</b> changes right away; everyone else sees them a moment later. This "catches up soon" behaviour is called <b>eventual consistency</b>.', 'win');
+}
+
+async function runFailover(ctx) {
+  const lost = 'Loved the ending (Kiran)';
+  Net.say('A new review arrives: <b>"Loved the ending"</b> from Kiran.');
+  await Net.beat(ctx, 1600);
+  await write(ctx, 'pri', lost);
+  const copies = Promise.all([copy(ctx, 'pri', 'r1', lost, 6000, true), copy(ctx, 'pri', 'r2', lost, 6000, true)]);
+  copies.catch(() => {});
+  await Net.wait(ctx, 1600);
+  Net.set('pri', { state: 'down', badge: 'crashed', badgeCls: 'bad' });
+  Net.say('<b>The primary crashes</b> before those copies reach the replicas.', 'err');
+  await copies;
+  Net.say('Kiran\'s review existed <b>only</b> on the dead primary. It is <b>lost</b>.', 'err');
+  await Net.beat(ctx);
+  Net.say('New writes fail too: there is no primary to accept them.', 'err');
+  await Net.send('app', 'pri', { label: 'INSERT review', cls: 'bad', stopAt: 0.85 });
+  await Net.beat(ctx, 1800);
+  Net.say('Replica 1 is <b>promoted</b> to be the new primary.');
+  Net.linkSet('app', 'pri', { cls: 'off' });
+  Net.linkSet('pri', 'r1', { cls: 'off' });
+  Net.linkSet('pri', 'r2', { cls: 'off' });
+  Net.set('r1', { label: 'Primary DB (new)', sub: 'all writes go here', badge: 'promoted', badgeCls: 'ok' });
+  Net.linkSet('app', 'r1', { dashed: false, label: 'writes + reads' });
+  Net.link('r1', 'r2', { dashed: true, label: 'copies changes' });
+  await Net.beat(ctx);
+  const t = 'Nice sound (Dev)';
+  await write(ctx, 'r1', t);
+  await copy(ctx, 'r1', 'r2', t, 1800);
+  Net.say('Writes work again. Replicas double as a <b>backup ready to take over</b> (failover). The catch: anything the old primary had not copied yet is lost.', 'win');
+}
+
+Net.scenarios([
+  { label: 'How replication works', setup, run: runHow },
+  { label: 'Replication lag', setup, run: runLag },
+  { label: 'Fix: read your own writes', setup, run: runFix },
+  { label: 'Primary crashes', setup, run: runFailover }
+], 'One database can only handle so many reads. The usual fix: <b>one primary for writes, several replicas for reads</b>. Pick a scenario above.');
+</script>
+</body>
+</html>

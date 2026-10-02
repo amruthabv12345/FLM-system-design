@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Microservices Overview</title>
+<link rel="stylesheet" href="net.css">
+<style>
+.intro { color: var(--muted); margin: 0 0 16px; }
+.list { display: grid; gap: 12px; }
+.topic { display: flex; gap: 16px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+.num { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--bg); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.topic h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.topic p { margin: 0; color: var(--muted); }
+.topic .go { margin-left: auto; flex: none; align-self: center; }
+.topic .go a { display: inline-block; text-decoration: none; padding: 7px 14px; border-radius: 8px; background: var(--teal); color: #fff; font-size: 14px; }
+.topic .go span { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Class 56: from one server to microservices</h1>
+    <nav class="pages">
+      <a class="on" href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+      <a href="reel-series.html">All 9, animated ↗</a>
+    </nav>
+  </header>
+  <p class="intro">One story: start with a single app and a single database, and add each piece only when a problem forces it. Running example: the movie ticketing app.</p>
+  <div class="list">
+    <div class="topic"><span class="num">1</span><div><h2>Monolith, and why split it</h2><p>One app, one database. As it grows: one bug takes everything down, you cannot scale just one part, and big teams step on each other.</p></div><div class="go"><span>teach on the board</span></div></div>
+    <div class="topic"><span class="num">2</span><div><h2>Microservices basics</h2><p>Split by business area: Movie, Booking, Payment. Each service owns its own database and talks to others over APIs. Trade-off: independent deploys and scaling, but network calls, harder debugging and no JOINs across services.</p></div><div class="go"><span>teach on the board</span></div></div>
+    <div class="topic"><span class="num">3</span><div><h2>Scaling: vertical vs horizontal</h2><p>A bigger machine vs more copies of the same service. More copies need something in front to share the traffic.</p></div><div class="go"><span>teach on the board</span></div></div>
+    <div class="topic"><span class="num">4</span><div><h2>Forward proxy vs reverse proxy</h2><p>Who does the middle-man work for? The clients (forward) or the servers (reverse)?</p></div><div class="go"><a href="proxies.html">Open animation</a></div></div>
+    <div class="topic"><span class="num">5</span><div><h2>Load balancer</h2><p>Round robin, least connections, IP hash, health checks, and L4 vs L7.</p></div><div class="go"><a href="load-balancer.html">Open animation</a></div></div>
+    <div class="topic"><span class="num">6</span><div><h2>API gateway</h2><p>One front door for every service: auth, rate limits and routing in one place. Gateway picks the service, load balancer picks the copy.</p></div><div class="go"><a href="api-gateway.html">Open animation</a></div></div>
+    <div class="topic"><span class="num">+</span><div><h2>Putting it together: one request, four middlemen</h2><p>Laptop → forward proxy → reverse proxy → API gateway → load balancer → server. Who owns each one, and what each one decides.</p></div><div class="go"><a href="flow.html">Open animation</a></div></div>
+    <div class="topic"><span class="num">7</span><div><h2>Read replicas</h2><p>One primary for writes, replicas for reads. Replication lag, read-your-own-writes, and what happens when the primary dies.</p></div><div class="go"><a href="replicas.html">Open animation</a></div></div>
+    <div class="topic"><span class="num">8</span><div><h2>Stateless services</h2><p>Sessions in server memory break load balancing. Sticky sessions vs a shared session store.</p></div><div class="go"><a href="stateless.html">Open animation</a></div></div>
+    <div class="topic"><span class="num">9</span><div><h2>CAP theorem</h2><p>When the network between database copies breaks, each piece of data must choose: stay correct and maybe refuse (CP), or always answer and maybe be stale (AP). Seat booking vs likes count.</p></div><div class="go"><a href="cap.html">Open animation</a></div></div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forward vs Reverse Proxy</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Forward proxy vs reverse proxy</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a class="on" href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(460);
+
+function setupForward() {
+  Net.group({ x: 20, y: 40, w: 220, h: 380, label: 'Office network' });
+  Net.node('a', { x: 130, y: 120, label: 'Laptop A', sub: 'IP 10.0.0.5', kind: 'client' });
+  Net.node('b', { x: 130, y: 230, label: 'Laptop B', sub: 'IP 10.0.0.6', kind: 'client' });
+  Net.node('c', { x: 130, y: 340, label: 'Laptop C', sub: 'IP 10.0.0.7', kind: 'client' });
+  Net.node('px', { x: 430, y: 230, label: 'Forward proxy', sub: 'company proxy · IP 49.36.1.1', kind: 'proxy' });
+  Net.group({ x: 700, y: 40, w: 280, h: 380, label: 'Internet' });
+  Net.node('yt', { x: 840, y: 120, label: 'youtube.com', w: 200 });
+  Net.node('gg', { x: 840, y: 230, label: 'google.com', w: 200 });
+  Net.node('ig', { x: 840, y: 340, label: 'instagram.com', w: 200 });
+  ['a', 'b', 'c'].forEach(n => Net.link(n, 'px'));
+  ['yt', 'gg', 'ig'].forEach(n => Net.link('px', n));
+}
+
+async function runForward(ctx) {
+  Net.say('Office laptops do not go to the internet directly. Every request goes through the company\'s <b>forward proxy</b>.');
+  await Net.beat(ctx);
+  Net.say('Laptop A opens google.com. The request goes to the proxy first.');
+  await Net.send('a', 'px', { label: 'GET google.com · from 10.0.0.5' });
+  Net.flash('px', 'ok');
+  Net.say('The proxy sends the request <b>on its own behalf</b>, from its own IP address.');
+  await Net.beat(ctx, 1800);
+  await Net.send('px', 'gg', { label: 'GET google.com · from 49.36.1.1' });
+  Net.set('gg', { sub: 'request came from 49.36.1.1' });
+  Net.say('google.com only sees the proxy\'s IP, <b>49.36.1.1</b>. It has no idea Laptop A exists.');
+  await Net.beat(ctx);
+  await Net.send('gg', 'px', { label: '200 OK', cls: 'ok' });
+  await Net.send('px', 'a', { label: '200 OK', cls: 'ok' });
+  Net.say('The answer comes back through the proxy to Laptop A.');
+  await Net.beat(ctx);
+  Net.say('Laptop C tries instagram.com, which the company has blocked.');
+  await Net.send('c', 'px', { label: 'GET instagram.com' });
+  Net.flash('px', 'bad');
+  Net.set('px', { badge: 'blocked', badgeCls: 'bad' });
+  await Net.send('px', 'c', { label: '403 Blocked by company policy', cls: 'bad' });
+  Net.say('The proxy can <b>block sites</b>, and it can also <b>log</b> and <b>cache</b> traffic for the whole office.', 'err');
+  await Net.beat(ctx);
+  Net.set('px', { badge: '' });
+  Net.say('<b>Forward proxy = works for the clients.</b> It hides who the client is and controls where clients may go. Examples: office or school proxy, VPN.', 'win');
+}
+
+function setupReverse() {
+  Net.node('u1', { x: 120, y: 150, label: 'User in Pune', kind: 'client c1' });
+  Net.node('u2', { x: 120, y: 310, label: 'User in Delhi', kind: 'client c2' });
+  Net.node('rp', { x: 420, y: 230, label: 'Reverse proxy', sub: 'api.bookmyshow.com · Nginx', kind: 'proxy' });
+  Net.group({ x: 650, y: 40, w: 330, h: 380, label: 'Private network' });
+  Net.node('s1', { x: 820, y: 120, label: 'Server 1', sub: 'IP 10.1.0.11' });
+  Net.node('s2', { x: 820, y: 230, label: 'Server 2', sub: 'IP 10.1.0.12' });
+  Net.node('s3', { x: 820, y: 340, label: 'Server 3', sub: 'IP 10.1.0.13' });
+  ['u1', 'u2'].forEach(n => Net.link(n, 'rp'));
+  ['s1', 's2', 's3'].forEach(n => Net.link('rp', n));
+}
+
+async function runReverse(ctx) {
+  Net.say('Users only know one address: <b>api.bookmyshow.com</b>. That address belongs to the <b>reverse proxy</b>.');
+  await Net.beat(ctx);
+  Net.say('The user in Pune asks for the list of movies.');
+  await Net.send('u1', 'rp', { label: 'GET /movies', cls: 'c1' });
+  Net.say('The proxy picks one of the servers <b>inside the private network</b> and passes the request on.');
+  await Net.beat(ctx, 1800);
+  await Net.send('rp', 's1', { label: 'GET /movies', cls: 'c1' });
+  Net.flash('s1', 'ok');
+  await Net.send('s1', 'rp', { label: '200 · movie list', cls: 'ok' });
+  await Net.send('rp', 'u1', { label: '200 · movie list', cls: 'ok' });
+  Net.say('The user never learns which server answered, or even that there are three of them.');
+  await Net.beat(ctx);
+  Net.say('The next user\'s request can go to a different server. That is how load gets spread.');
+  await Net.send('u2', 'rp', { label: 'GET /movies', cls: 'c2' });
+  await Net.send('rp', 's2', { label: 'GET /movies', cls: 'c2' });
+  Net.flash('s2', 'ok');
+  await Net.send('s2', 'rp', { label: '200', cls: 'ok' });
+  await Net.send('rp', 'u2', { label: '200', cls: 'ok' });
+  await Net.beat(ctx, 1600);
+  Net.say('Can a user reach Server 3 directly? No: its address is private and not reachable from the internet.');
+  await Net.send('u2', 's3', { label: 'GET 10.1.0.13', cls: 'bad', stopAt: 0.5 });
+  Net.say('The request never gets there. Only the proxy can talk to the servers.', 'err');
+  await Net.beat(ctx);
+  Net.say('<b>Reverse proxy = works for the servers.</b> One public address, servers stay hidden, and it can handle HTTPS, caching and spreading load. A load balancer is a kind of reverse proxy.', 'win');
+}
+
+Net.scenarios([
+  { label: 'Forward proxy', setup: setupForward, run: runForward },
+  { label: 'Reverse proxy', setup: setupReverse, run: runReverse }
+], 'Both sit in the middle of a request. The question is: <b>who do they work for?</b> Pick a scenario above.');
+</script>
+</body>
+</html>

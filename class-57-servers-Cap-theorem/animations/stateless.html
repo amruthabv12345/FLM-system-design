@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stateless Services</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Stateless services and sessions</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a class="on" href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(500);
+
+const memHTML = has => `<div class="mem ${has ? 'has' : ''}">memory: ${has ? 'session abc → Zoya' : 'no sessions'}</div>`;
+const cookieHTML = c => `<div class="mem ${c ? 'has' : ''}">cookie: ${c || 'none'}</div>`;
+
+function setup(withStore) {
+  Net.node('user', { x: 110, y: 250, label: 'Zoya\'s browser', kind: 'client c1', w: 180, body: cookieHTML('') });
+  Net.node('lb', { x: 370, y: 250, label: 'Load balancer', sub: 'round robin', kind: 'lb', w: 190 });
+  ['A', 'B', 'C'].forEach((k, i) => Net.node('s' + k, { x: 650, y: 110 + i * 140, label: 'Server ' + k, w: 210, body: withStore ? '<div class="mem">memory: nothing kept</div>' : memHTML(false) }));
+  Net.link('user', 'lb');
+  ['A', 'B', 'C'].forEach(k => Net.link('lb', 's' + k));
+  if (withStore) {
+    Net.node('store', { x: 900, y: 250, label: 'Session store', sub: 'e.g. Redis', kind: 'db', w: 170, body: '<div class="mem">empty</div>' });
+    ['A', 'B', 'C'].forEach(k => Net.link('s' + k, 'store', { dashed: true }));
+  }
+}
+
+async function hop(ctx, path, label, cls) {
+  for (let i = 0; i < path.length - 1; i++) {
+    await Net.send(path[i], path[i + 1], { label, cls: cls || 'c1', dur: 900 });
+    Net.check(ctx);
+  }
+}
+
+async function login(ctx, server) {
+  Net.say(`Zoya logs in. The load balancer sends the request to <b>Server ${server}</b>.`);
+  await hop(ctx, ['user', 'lb', 's' + server], 'POST /login');
+  Net.set('s' + server, { body: memHTML(true) });
+  Net.flash('s' + server, 'ok');
+  Net.say(`Server ${server} keeps her session <b>in its own memory</b>, and gives her a cookie holding the session id.`);
+  await hop(ctx, ['s' + server, 'lb', 'user'], '200 · cookie session=abc', 'ok');
+  Net.set('user', { body: cookieHTML('session=abc') });
+}
+
+async function runStateful(ctx) {
+  await login(ctx, 'A');
+  await Net.beat(ctx);
+  Net.say('She opens her cart. Round robin sends this request to <b>Server B</b>.');
+  await hop(ctx, ['user', 'lb', 'sB'], 'GET /cart · cookie abc');
+  Net.flash('sB', 'bad');
+  Net.say('Server B looks in its memory for session abc. <b>Nothing there.</b>', 'err');
+  await Net.beat(ctx, 1800);
+  await hop(ctx, ['sB', 'lb', 'user'], '401 Please log in again', 'bad');
+  Net.say('Only Server A remembers her. Every other server sees a stranger, so the load balancer <b>cannot freely spread</b> her requests.', 'err');
+}
+
+async function runSticky(ctx) {
+  Net.set('lb', { sub: 'sticky sessions' });
+  await login(ctx, 'A');
+  Net.set('lb', { sub: 'sticky: Zoya → A' });
+  Net.say('<b>Sticky sessions</b>: the load balancer notes that Zoya belongs to Server A, and always sends her there.');
+  await Net.beat(ctx);
+  for (const path of ['GET /cart', 'POST /cart/items']) {
+    await hop(ctx, ['user', 'lb', 'sA'], path + ' · cookie abc');
+    Net.flash('sA', 'ok');
+    await hop(ctx, ['sA', 'lb', 'user'], '200', 'ok');
+  }
+  Net.say('It works...');
+  await Net.beat(ctx, 1600);
+  Net.set('sA', { state: 'down', body: memHTML(false), badge: 'crashed', badgeCls: 'bad' });
+  Net.say('...until <b>Server A crashes</b>. Everything in its memory is gone.', 'err');
+  await Net.beat(ctx);
+  await Net.send('user', 'lb', { label: 'GET /cart · cookie abc', cls: 'c1', dur: 900 });
+  Net.set('lb', { sub: 'A is down → send to B' });
+  await Net.send('lb', 'sB', { label: 'GET /cart · cookie abc', cls: 'c1', dur: 900 });
+  Net.flash('sB', 'bad');
+  await hop(ctx, ['sB', 'lb', 'user'], '401 Please log in again', 'bad');
+  Net.say('Her session died with Server A, so she is logged out. Sticky sessions also spread load unevenly: a server full of busy users cannot hand them to others.', 'err');
+}
+
+async function runStateless(ctx) {
+  Net.say('Now the servers keep <b>nothing</b> in their own memory. Sessions live in a shared <b>session store</b> that every server can reach.');
+  await Net.beat(ctx);
+  Net.say('Zoya logs in through <b>Server A</b>.');
+  await hop(ctx, ['user', 'lb', 'sA'], 'POST /login');
+  await Net.send('sA', 'store', { label: 'save: abc → Zoya', cls: 'amber' }); Net.check(ctx);
+  Net.set('store', { body: '<div class="mem has">abc → Zoya</div>' });
+  Net.flash('store', 'ok');
+  await hop(ctx, ['sA', 'lb', 'user'], '200 · cookie session=abc', 'ok');
+  Net.set('user', { body: cookieHTML('session=abc') });
+  await Net.beat(ctx);
+  Net.say('She opens her cart. This time the request lands on <b>Server B</b>.');
+  await hop(ctx, ['user', 'lb', 'sB'], 'GET /cart · cookie abc');
+  await Net.send('sB', 'store', { label: 'who is abc?', cls: 'amber' }); Net.check(ctx);
+  await Net.send('store', 'sB', { label: 'Zoya ✓', cls: 'ok' }); Net.check(ctx);
+  Net.flash('sB', 'ok');
+  await hop(ctx, ['sB', 'lb', 'user'], '200 · her cart', 'ok');
+  Net.say('B had never seen Zoya, but it simply <b>looked her up</b> in the store.', 'win');
+  await Net.beat(ctx);
+  Net.set('sA', { state: 'down', badge: 'crashed', badgeCls: 'bad' });
+  Net.say('Now <b>Server A crashes</b>...', 'err');
+  await Net.beat(ctx, 1800);
+  await Net.send('user', 'lb', { label: 'GET /cart · cookie abc', cls: 'c1', dur: 900 });
+  Net.set('lb', { sub: 'A is down → send to C' });
+  await Net.send('lb', 'sC', { label: 'GET /cart · cookie abc', cls: 'c1', dur: 900 });
+  await Net.send('sC', 'store', { label: 'who is abc?', cls: 'amber' }); Net.check(ctx);
+  await Net.send('store', 'sC', { label: 'Zoya ✓', cls: 'ok' }); Net.check(ctx);
+  Net.flash('sC', 'ok');
+  await hop(ctx, ['sC', 'lb', 'user'], '200 · her cart', 'ok');
+  Net.say('Nothing lost. <b>Any server can answer any request, and any server can die.</b> That is what makes adding or removing servers easy. (Another option: JWT tokens, where the user\'s details travel inside the token itself.)', 'win');
+}
+
+Net.scenarios([
+  { label: 'Session in server memory', setup: () => setup(false), run: runStateful },
+  { label: 'Sticky sessions', setup: () => setup(false), run: runSticky },
+  { label: 'Stateless: shared session store', setup: () => setup(true), run: runStateless }
+], 'With several servers behind a load balancer, where should a logged-in user\'s session live? Pick a scenario above.');
+</script>
+</body>
+</html>

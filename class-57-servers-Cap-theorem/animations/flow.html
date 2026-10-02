@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Full Request Flow</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>One request through all four middlemen</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a class="on" href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(520);
+
+function setupFull() {
+  Net.group({ x: 5, y: 20, w: 290, h: 480, label: 'Your office' });
+  Net.group({ x: 335, y: 20, w: 660, h: 480, label: 'BookMyShow' });
+  Net.node('pc', { x: 75, y: 260, label: 'Laptop', sub: '10.0.0.5', kind: 'client c2', w: 120 });
+  Net.node('fp', { x: 220, y: 260, label: 'Forward proxy', sub: 'office proxy', kind: 'proxy', w: 140 });
+  Net.node('rp', { x: 410, y: 260, label: 'Reverse proxy', sub: 'front door', kind: 'proxy', w: 140 });
+  Net.node('gw', { x: 590, y: 260, label: 'API gateway', sub: 'which service?', kind: 'gateway', w: 200 });
+  Net.node('mlb', { x: 775, y: 150, label: 'Movie LB', sub: 'which copy?', kind: 'lb', w: 130 });
+  Net.node('blb', { x: 775, y: 390, label: 'Booking LB', sub: 'which copy?', kind: 'lb', w: 130 });
+  Net.node('m1', { x: 925, y: 80, label: 'Movie #1', w: 120 });
+  Net.node('m2', { x: 925, y: 150, label: 'Movie #2', w: 120 });
+  Net.node('m3', { x: 925, y: 220, label: 'Movie #3', w: 120 });
+  Net.node('b1', { x: 925, y: 350, label: 'Booking #1', w: 120 });
+  Net.node('b2', { x: 925, y: 430, label: 'Booking #2', w: 120 });
+  Net.link('pc', 'fp');
+  Net.link('fp', 'rp', { dashed: true, label: 'internet' });
+  Net.link('rp', 'gw');
+  Net.link('gw', 'mlb');
+  Net.link('gw', 'blb');
+  ['m1', 'm2', 'm3'].forEach(n => Net.link('mlb', n));
+  ['b1', 'b2'].forEach(n => Net.link('blb', n));
+}
+
+async function hop(ctx, a, b, label, cls) {
+  await Net.send(a, b, { label, cls: cls || 'c2', dur: 1000 });
+  Net.check(ctx);
+}
+
+async function back(ctx, path) {
+  for (let i = path.length - 1; i > 0; i--) await hop(ctx, path[i], path[i - 1], '200 · data', 'ok');
+}
+
+async function runFull(ctx) {
+  Net.say('One request from a laptop in an office to BookMyShow\'s Movie service. It passes <b>four middlemen</b>, and each has <b>one job</b>.');
+  await Net.beat(ctx);
+  await hop(ctx, 'pc', 'fp', 'GET api.bookmyshow.com/movies');
+  Net.set('fp', { state: 'on' });
+  Net.say('<b>1. Forward proxy</b>, owned by <b>your office</b>. Is this site allowed? Yes. It sends the request on using the office\'s IP, so BookMyShow never sees your laptop. <i>Hides the client.</i>');
+  await Net.beat(ctx, 3200);
+  Net.set('fp', { state: '' });
+  await hop(ctx, 'fp', 'rp', 'GET /movies · from 49.36.1.1');
+  Net.set('rp', { state: 'on' });
+  Net.say('<b>2. Reverse proxy</b>, owned by <b>BookMyShow</b>. It is the public front door, <code>api.bookmyshow.com</code>. It decrypts HTTPS, can answer from cache, and blocks attacks. <i>Hides the servers.</i>');
+  await Net.beat(ctx, 3200);
+  Net.set('rp', { state: '' });
+  await hop(ctx, 'rp', 'gw', 'GET /movies · token');
+  Net.set('gw', { state: 'on', sub: '/movies → Movie service' });
+  Net.say('<b>3. API gateway</b>: is the login token valid? Under the rate limit? Then it reads the path: <code>/movies</code> belongs to the <b>Movie service</b>. <i>Which service?</i>');
+  await Net.beat(ctx, 3200);
+  Net.set('gw', { state: '' });
+  await hop(ctx, 'gw', 'mlb', 'GET /movies');
+  Net.set('mlb', { state: 'on', sub: 'least busy → #2' });
+  Net.say('<b>4. Load balancer</b>: the Movie service runs as 3 identical copies. It picks the least busy one, <b>#2</b>. <i>Which copy?</i>');
+  await Net.beat(ctx, 3200);
+  Net.set('mlb', { state: '' });
+  await hop(ctx, 'mlb', 'm2', 'GET /movies');
+  Net.flash('m2', 'ok');
+  Net.say('Movie server #2 finally does the real work. The answer goes back through the <b>same chain</b>.');
+  await back(ctx, ['pc', 'fp', 'rp', 'gw', 'mlb', 'm2']);
+  Net.say('<b>Forward proxy</b>: your side, hides you. <b>Reverse proxy</b>: their side, hides them. <b>API gateway</b>: which service? <b>Load balancer</b>: which copy?', 'win');
+}
+
+async function runPaths(ctx) {
+  Net.say('Same front door, three requests. Watch who decides what.');
+  await Net.beat(ctx);
+  const trips = [
+    ['GET /movies', 'mlb', 'm1', '/movies → Movie service', 'next copy → #1'],
+    ['POST /bookings', 'blb', 'b1', '/bookings → Booking service', 'next copy → #1'],
+    ['GET /movies', 'mlb', 'm3', '/movies → Movie service', 'least busy → #3']
+  ];
+  for (let i = 0; i < trips.length; i++) {
+    const [path, lb, server, gwSub, lbSub] = trips[i];
+    await hop(ctx, 'pc', 'fp', path);
+    await hop(ctx, 'fp', 'rp', path);
+    await hop(ctx, 'rp', 'gw', path);
+    Net.set('gw', { sub: gwSub, state: 'on' });
+    if (i === 0) {
+      Net.say('The <b>gateway</b> looks at the <b>path</b> and chooses the <b>service</b>: service mapping.');
+      await Net.beat(ctx);
+    }
+    await hop(ctx, 'gw', lb, path);
+    Net.set('gw', { state: '' });
+    Net.set(lb, { sub: lbSub, state: 'on' });
+    if (i === 0) {
+      Net.say('That service\'s <b>load balancer</b> chooses the <b>copy</b>: server mapping.');
+      await Net.beat(ctx);
+    }
+    await hop(ctx, lb, server, path);
+    Net.set(lb, { state: '' });
+    Net.flash(server, 'ok');
+    if (i === 1) {
+      Net.say('<code>/bookings</code> goes to a different service, with its own load balancer and its own copies.');
+      await Net.beat(ctx);
+    }
+  }
+  Net.say('The gateway decided <b>Movie vs Booking</b> from the path. Each load balancer then picked <b>one of its identical copies</b>. The office proxy and the reverse proxy did the same thing every time.', 'win');
+}
+
+function setupSmall() {
+  Net.group({ x: 5, y: 20, w: 290, h: 480, label: 'Your office' });
+  Net.group({ x: 335, y: 20, w: 660, h: 480, label: 'BookMyShow' });
+  Net.node('pc', { x: 75, y: 260, label: 'Laptop', sub: '10.0.0.5', kind: 'client c2', w: 120 });
+  Net.node('fp', { x: 220, y: 260, label: 'Forward proxy', sub: 'office proxy', kind: 'proxy', w: 140 });
+  Net.node('nx', { x: 530, y: 260, label: 'Nginx', sub: 'one box, three roles', kind: 'gateway', w: 250,
+    body: '<div class="steps"><div>reverse proxy: HTTPS, cache</div><div>gateway: /movies → Movie</div><div>load balancer: pick a copy</div></div>' });
+  Net.node('m1', { x: 870, y: 120, label: 'Movie #1', w: 130 });
+  Net.node('m2', { x: 870, y: 210, label: 'Movie #2', w: 130 });
+  Net.node('b1', { x: 870, y: 330, label: 'Booking #1', w: 130 });
+  Net.node('b2', { x: 870, y: 420, label: 'Booking #2', w: 130 });
+  Net.link('pc', 'fp');
+  Net.link('fp', 'nx', { dashed: true, label: 'internet' });
+  ['m1', 'm2', 'b1', 'b2'].forEach(n => Net.link('nx', n));
+}
+
+async function runSmall(ctx) {
+  Net.say('In a small system you do not need three separate machines. One tool, like <b>Nginx</b>, can play all three server-side roles.');
+  await Net.beat(ctx);
+  await hop(ctx, 'pc', 'fp', 'GET /movies');
+  await hop(ctx, 'fp', 'nx', 'GET /movies');
+  Net.set('nx', { state: 'on' });
+  Net.say('The same box decrypts HTTPS (reverse proxy), sees <code>/movies</code> (gateway), and picks Movie #2 (load balancer).');
+  await Net.beat(ctx, 3200);
+  Net.set('nx', { state: '' });
+  await hop(ctx, 'nx', 'm2', 'GET /movies');
+  Net.flash('m2', 'ok');
+  await back(ctx, ['pc', 'fp', 'nx', 'm2']);
+  Net.say('Reverse proxy, API gateway and load balancer are <b>roles</b>, not necessarily separate machines. Big systems split them up; small ones often run them in one tool (Nginx, Envoy, AWS Application Load Balancer).', 'win');
+}
+
+Net.scenarios([
+  { label: 'Full journey', setup: setupFull, run: runFull },
+  { label: 'Two different paths', setup: setupFull, run: runPaths },
+  { label: 'Small setup: one box', setup: setupSmall, run: runSmall }
+], 'Forward proxy, reverse proxy, API gateway and load balancer can all sit in one request\'s path.');
+</script>
+</body>
+</html>

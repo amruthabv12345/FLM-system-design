@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAP Theorem</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>CAP theorem: when the network breaks</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a class="on" href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = start / pause, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(460);
+
+// ---------- seat booking: one seat, two copies of the data ----------
+let seat;
+
+const seatHTML = v => v === 'FREE'
+  ? '<div class="mem has">Seat A7: <b>FREE</b></div>'
+  : `<div class="mem" style="background: var(--bad-bg)">Seat A7: <b>${v}</b></div>`;
+
+function setupSeats() {
+  seat = { m: 'FREE', d: 'FREE' };
+  Net.node('zoya', { x: 90, y: 230, label: 'Zoya', sub: 'books from Pune', kind: 'client c1', w: 150 });
+  Net.node('mum', { x: 320, y: 230, label: 'Database copy 1', sub: 'Mumbai', kind: 'db', w: 200, body: seatHTML('FREE') });
+  Net.node('del', { x: 680, y: 230, label: 'Database copy 2', sub: 'Delhi', kind: 'db', w: 200, body: seatHTML('FREE') });
+  Net.node('aman', { x: 910, y: 230, label: 'Aman', sub: 'books from Delhi', kind: 'client c2', w: 150 });
+  Net.link('zoya', 'mum');
+  Net.link('mum', 'del', { label: 'sync link' });
+  Net.link('del', 'aman');
+}
+
+function setSeat(k, v) {
+  seat[k] = v;
+  Net.set(k === 'm' ? 'mum' : 'del', { body: seatHTML(v) });
+}
+
+function cutLink() {
+  Net.linkSet('mum', 'del', { cls: 'cut', label: 'network broken' });
+  Net.set('mum', { badge: 'cut off', badgeCls: 'bad' });
+  Net.set('del', { badge: 'cut off', badgeCls: 'bad' });
+}
+
+// Zoya books seat A7 on her copy; the copy tries to tell the other copy.
+async function zoyaBooks(ctx, linkWorks) {
+  await Net.send('zoya', 'mum', { label: 'book seat A7', cls: 'c1' }); Net.check(ctx);
+  setSeat('m', 'BOOKED (Zoya)');
+  Net.flash('mum', 'ok');
+  await Net.send('mum', 'zoya', { label: 'booked ✓', cls: 'ok', dur: 800 }); Net.check(ctx);
+  if (linkWorks) {
+    await Net.send('mum', 'del', { label: 'sync: A7 booked', cls: 'amber' }); Net.check(ctx);
+    setSeat('d', 'BOOKED (Zoya)');
+    Net.flash('del', 'ok');
+  } else {
+    await Net.send('mum', 'del', { label: 'sync: A7 booked', cls: 'amber', stopAt: 0.5 }); Net.check(ctx);
+  }
+}
+
+async function runNormal(ctx) {
+  Net.say('One movie show, one seat left: <b>A7</b>. The booking data is kept in <b>two copies</b>, in Mumbai and Delhi, so each user talks to the nearer one.');
+  await Net.beat(ctx);
+  Net.say('Zoya books A7 on the Mumbai copy. Mumbai immediately tells Delhi over the <b>sync link</b>.');
+  await zoyaBooks(ctx, true);
+  await Net.beat(ctx, 1800);
+  Net.say('Aman asks the Delhi copy for seat A7.');
+  await Net.send('aman', 'del', { label: 'is A7 free?', cls: 'c2' }); Net.check(ctx);
+  await Net.send('del', 'aman', { label: 'no, booked', cls: 'ok' }); Net.check(ctx);
+  Net.say('Both copies agree (<b>Consistency</b>) and both answer every request (<b>Availability</b>). While the network works, you get both.', 'win');
+}
+
+async function runPartition(ctx) {
+  Net.say('Networks between data centres <b>do</b> fail: a cable is cut, a router dies. This is called a <b>network Partition</b> (the P in CAP).');
+  await Net.beat(ctx);
+  cutLink();
+  Net.say('The Mumbai and Delhi copies <b>can no longer talk</b>. Both are still running, and users can still reach them.', 'err');
+  await Net.beat(ctx);
+  Net.say('Zoya books A7 on the Mumbai copy. Mumbai tries to tell Delhi...');
+  await zoyaBooks(ctx, false);
+  Net.say('...but the message never arrives. Delhi still thinks A7 is <b>FREE</b>.', 'err');
+  await Net.beat(ctx);
+  Net.say('Now Aman asks the Delhi copy to book A7.');
+  await Net.send('aman', 'del', { label: 'book seat A7', cls: 'c2' }); Net.check(ctx);
+  Net.set('del', { state: 'on' });
+  Net.say('Delhi <b>cannot check with Mumbai</b>. It has only two options: <b>refuse</b> (stay correct) or <b>answer anyway</b> (stay available). It cannot do both. Play the next two scenarios to see each choice.', 'err');
+}
+
+async function runCP(ctx) {
+  Net.say('Choice 1: <b>Consistency first (CP)</b>. Same broken network.');
+  await Net.beat(ctx, 1800);
+  cutLink();
+  await zoyaBooks(ctx, false);
+  Net.say('Aman asks Delhi to book A7.');
+  await Net.send('aman', 'del', { label: 'book seat A7', cls: 'c2' }); Net.check(ctx);
+  Net.set('del', { state: 'on' });
+  Net.say('Delhi thinks: "I cannot confirm with Mumbai, so I may be out of date. I will <b>not guess</b>."');
+  await Net.beat(ctx);
+  Net.set('del', { state: '' });
+  Net.flash('del', 'bad');
+  await Net.send('del', 'aman', { label: 'Sorry, try again later', cls: 'bad' }); Net.check(ctx);
+  Net.say('Aman gets an <b>error</b>: the system was <b>less available</b>. But nobody got wrong data, and the seat was not sold twice.', 'err');
+  await Net.beat(ctx);
+  Net.say('<b>CP is right when wrong data is worse than an error</b>: seat booking, bank balances, payments, stock in a warehouse.', 'win');
+}
+
+async function runAP(ctx) {
+  Net.say('Choice 2: <b>Availability first (AP)</b>. Same broken network.');
+  await Net.beat(ctx, 1800);
+  cutLink();
+  await zoyaBooks(ctx, false);
+  Net.say('Aman asks Delhi to book A7. Delhi answers <b>with what it has</b>: as far as Delhi knows, A7 is free.');
+  await Net.send('aman', 'del', { label: 'book seat A7', cls: 'c2' }); Net.check(ctx);
+  setSeat('d', 'BOOKED (Aman)');
+  Net.flash('del', 'ok');
+  await Net.send('del', 'aman', { label: 'booked ✓', cls: 'ok' }); Net.check(ctx);
+  Net.say('Both users got a quick, happy answer. Everything stayed <b>available</b>...');
+  await Net.beat(ctx);
+  Net.say('...then the network is repaired, and the two copies compare notes.');
+  Net.linkSet('mum', 'del', { cls: '', label: 'sync link' });
+  Net.set('mum', { badge: '' });
+  Net.set('del', { badge: '' });
+  await Promise.all([
+    Net.send('mum', 'del', { label: 'A7: Zoya', cls: 'amber' }),
+    Net.send('del', 'mum', { label: 'A7: Aman', cls: 'amber' })
+  ]);
+  Net.check(ctx);
+  Net.set('mum', { badge: 'conflict!', badgeCls: 'bad' });
+  Net.set('del', { badge: 'conflict!', badgeCls: 'bad' });
+  Net.say('<b>Seat A7 was sold twice.</b> The copies disagreed: the system was not <b>consistent</b>. Someone now gets a refund and an angry phone call.', 'err');
+  await Net.beat(ctx);
+  Net.say('For seats, AP was the wrong choice. But for some data, a short disagreement is completely fine. See the next scenario.', 'win');
+}
+
+// ---------- likes count: AP done right ----------
+let likes;
+const likesHTML = n => `<div class="mem has">Likes: <b>${n}</b></div>`;
+
+function setupLikes() {
+  likes = { m: 100, d: 100 };
+  Net.node('zoya', { x: 100, y: 130, label: 'Zoya', sub: 'Pune', kind: 'client c1', w: 130 });
+  Net.node('om', { x: 100, y: 330, label: 'Om', sub: 'Mumbai', kind: 'client c3', w: 130 });
+  Net.node('mum', { x: 320, y: 230, label: 'Database copy 1', sub: 'Mumbai', kind: 'db', w: 200, body: likesHTML(100) });
+  Net.node('del', { x: 680, y: 230, label: 'Database copy 2', sub: 'Delhi', kind: 'db', w: 200, body: likesHTML(100) });
+  Net.node('aman', { x: 900, y: 230, label: 'Aman', sub: 'Delhi', kind: 'client c2', w: 130 });
+  Net.link('zoya', 'mum');
+  Net.link('om', 'mum');
+  Net.link('mum', 'del', { label: 'sync link' });
+  Net.link('del', 'aman');
+}
+
+function setLikes(k, n) {
+  likes[k] = n;
+  Net.set(k === 'm' ? 'mum' : 'del', { body: likesHTML(n) });
+}
+
+async function like(ctx, user, k, cls) {
+  const id = k === 'm' ? 'mum' : 'del';
+  await Net.send(user, id, { label: 'like ♥', cls }); Net.check(ctx);
+  setLikes(k, likes[k] + 1);
+  Net.flash(id, 'ok');
+}
+
+async function runLikes(ctx) {
+  Net.say('A movie trailer has <b>100 likes</b>, stored in both copies.');
+  await Net.beat(ctx);
+  cutLink();
+  Net.say('The network between the copies breaks again. This time the system chooses <b>availability</b>: keep accepting likes everywhere.', 'err');
+  await Net.beat(ctx);
+  await like(ctx, 'zoya', 'm', 'c1');
+  await like(ctx, 'om', 'm', 'c3');
+  await like(ctx, 'aman', 'd', 'c2');
+  Net.say('Mumbai shows <b>102</b>, Delhi shows <b>101</b>. The real total is 103. Users in different cities see different numbers for a while...');
+  await Net.beat(ctx);
+  Net.say('...and nobody minds. Nobody is harmed if a like count is a little behind.');
+  await Net.beat(ctx);
+  Net.linkSet('mum', 'del', { cls: '', label: 'sync link' });
+  Net.set('mum', { badge: '' });
+  Net.set('del', { badge: '' });
+  Net.say('The network is repaired. Each copy sends the other the likes it missed.');
+  await Promise.all([
+    Net.send('mum', 'del', { label: '+2 likes', cls: 'amber' }),
+    Net.send('del', 'mum', { label: '+1 like', cls: 'amber' })
+  ]);
+  Net.check(ctx);
+  setLikes('m', 103);
+  setLikes('d', 103);
+  Net.flash('mum', 'ok');
+  Net.flash('del', 'ok');
+  Net.say('Both show <b>103</b>. They disagreed for a while, then <b>caught up</b>: this is <b>eventual consistency</b>. AP is right for likes, views, comments, feeds and reviews.', 'win');
+  await Net.beat(ctx, 3500);
+  Net.say('<b>CAP in one line</b>: networks will break (P), and when they do, each piece of data must pick <b>C</b> (correct, may refuse) or <b>A</b> (always answers, may be stale). Seats and money pick C; likes and feeds pick A.', 'win');
+}
+
+Net.scenarios([
+  { label: '1. Network working', setup: setupSeats, run: runNormal },
+  { label: '2. Network breaks', setup: setupSeats, run: runPartition },
+  { label: '3. Choose consistency (CP)', setup: setupSeats, run: runCP },
+  { label: '4. Choose availability (AP)', setup: setupSeats, run: runAP },
+  { label: '5. AP done right: likes', setup: setupLikes, run: runLikes }
+], '<b>C</b>onsistency: every copy shows the same data. <b>A</b>vailability: every request gets an answer. <b>P</b>artition: the network between copies breaks.');
+</script>
+</body>
+</html>

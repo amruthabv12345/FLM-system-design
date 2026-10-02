@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Load Balancer</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Load balancer</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a class="on" href="load-balancer.html">Load balancer</a>
+      <a href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(500);
+const USERS = ['u1', 'u2', 'u3'];
+const KEYS = ['A', 'B', 'C'];
+const userCls = u => u.replace('u', 'c');
+let S;
+
+async function until(ctx, cond) { while (!cond()) await Net.wait(ctx, 100); }
+
+// ---------- shared picture: 3 users, a load balancer, 3 servers ----------
+function setupCluster(lbSub) {
+  S = {};
+  KEYS.forEach(k => { S[k] = { active: 0, done: 0, peak: 0, up: true, fails: 0, oks: 0, inRot: true }; });
+  Net.node('u1', { x: 110, y: 130, label: 'User 1', sub: 'IP 49.1.1.1', kind: 'client c1' });
+  Net.node('u2', { x: 110, y: 250, label: 'User 2', sub: 'IP 49.2.2.2', kind: 'client c2' });
+  Net.node('u3', { x: 110, y: 370, label: 'User 3', sub: 'IP 49.3.3.3', kind: 'client c3' });
+  Net.node('lb', { x: 420, y: 250, label: 'Load balancer', sub: lbSub, kind: 'lb', w: 220 });
+  KEYS.forEach((k, i) => Net.node('s' + k, { x: 800, y: 130 + i * 120, label: 'Server ' + k, w: 200, body: loadHTML(k) }));
+  USERS.forEach(u => Net.link(u, 'lb'));
+  KEYS.forEach(k => Net.link('lb', 's' + k));
+}
+
+function loadHTML(k) {
+  const s = S[k];
+  return `<div class="bar"><i style="width:${Math.min(100, s.active * 25)}%"></i></div>busy with <b>${s.active}</b> · done ${s.done} · peak ${s.peak}`;
+}
+function paintS(k) {
+  Net.set('s' + k, { body: loadHTML(k), state: !S[k].up ? 'down' : S[k].active >= 3 ? 'hot' : '' });
+}
+
+async function request(ctx, u, k, dur, label) {
+  const cls = userCls(u);
+  await Net.send('lb', 's' + k, { label, cls, dur: 800 }); Net.check(ctx);
+  const s = S[k];
+  await Net.wait(ctx, dur);
+  s.active--; s.done++; paintS(k);
+  await Net.send('s' + k, 'lb', { label: '✓', cls: 'ok', dur: 600 }); Net.check(ctx);
+  await Net.send('lb', u, { label: '✓', cls: 'ok', dur: 600 }); Net.check(ctx);
+}
+
+async function runAlgo(ctx, o) {
+  Net.say(o.intro);
+  await Net.beat(ctx);
+  const jobs = [];
+  for (let i = 0; i < o.seq.length; i++) {
+    const [u, dur] = o.seq[i];
+    await Net.send(u, 'lb', { label: `req ${i + 1}`, cls: userCls(u), dur: 700 });
+    const k = o.pick(u, i);
+    // The load balancer counts the request as busy the moment it sends it to a server.
+    S[k].active++; S[k].peak = Math.max(S[k].peak, S[k].active); paintS(k);
+    Net.set('lb', { sub: `${o.rule(u, i, k)}` });
+    const heavy = dur > 3000;
+    const p = request(ctx, u, k, dur, `req ${i + 1}${heavy ? ' · heavy' : ''}`);
+    p.catch(() => {});
+    jobs.push(p);
+    if (o.notes && o.notes[i]) Net.say(o.notes[i][0], o.notes[i][1]);
+    await Net.wait(ctx, 100);
+  }
+  Net.say('All requests are sent. Waiting for the servers to finish...');
+  await Promise.all(jobs);
+  Net.set('lb', { sub: 'done' });
+  Net.say(o.outro, 'win');
+}
+
+// Every 3rd request is heavy (6.5 s instead of 1.5 s).
+const MIXED = Array.from({ length: 12 }, (_, i) => [USERS[i % 3], i % 3 === 2 ? 6500 : 1500]);
+
+function runRoundRobin(ctx) {
+  return runAlgo(ctx, {
+    intro: '<b>Round robin</b>: send requests to A, B, C, A, B, C... in turn. Simple and fair, as long as every request is equally heavy. Here every 3rd request is a <b>heavy</b> one.',
+    seq: MIXED,
+    pick: (u, i) => KEYS[i % 3],
+    rule: (u, i, k) => `turn ${i + 1}: next in line → ${k}`,
+    notes: { 6: ['Look at Server C: every heavy request lands on it, because it is always "3rd in line". A and B are nearly idle.', 'err'] },
+    outro: 'Server C got <b>every heavy request</b> and was overloaded, while A and B sat idle. Round robin only counts turns, not how busy a server is.'
+  });
+}
+
+function runLeast(ctx) {
+  return runAlgo(ctx, {
+    intro: '<b>Least connections</b>: send each request to the server that is <b>busy with the fewest requests right now</b>. Same 12 requests, same heavy ones.',
+    seq: MIXED,
+    pick: () => KEYS.reduce((best, k) => S[k].active < S[best].active ? k : best, 'A'),
+    rule: (u, i, k) => `least busy right now → ${k}`,
+    notes: { 6: ['A server that is stuck on a heavy request gets skipped until it frees up.'] },
+    outro: 'The heavy requests got <b>spread out</b>, and no server got overloaded. Least connections looks at how busy each server is, not just whose turn it is.'
+  });
+}
+
+function runHash(ctx) {
+  const seq = ['u1', 'u1', 'u2', 'u1', 'u3', 'u1', 'u2', 'u1', 'u1', 'u3', 'u2', 'u1'].map(u => [u, 3000]);
+  const map = { u1: 'A', u2: 'B', u3: 'C' };
+  return runAlgo(ctx, {
+    intro: '<b>IP hash</b>: turn the user\'s IP into a number and pick <code>hash(IP) % 3</code>. The <b>same user always lands on the same server</b>.',
+    seq,
+    pick: u => map[u],
+    rule: (u, i, k) => `hash(${u === 'u1' ? '49.1.1.1' : u === 'u2' ? '49.2.2.2' : '49.3.3.3'}) % 3 → ${k}`,
+    notes: { 5: ['Useful when a server keeps something for that user, like a cache or a login session. But User 1 is very active...'] },
+    outro: 'Same user, same server: handy for caching and sessions. The downside: User 1 sent most requests, so <b>Server A did most of the work</b>. Load follows the users, not the servers.'
+  });
+}
+
+// ---------- health checks ----------
+function lbHealthHTML() {
+  return KEYS.map(k => `<div class="mem ${S[k].inRot ? 'has' : ''}">${k}: ${S[k].inRot ? 'in rotation' : '<b>OUT</b>'}${S[k].fails ? ` · missed ${S[k].fails} of 2` : ''}</div>`).join('');
+}
+
+async function ping(ctx, k) {
+  const s = S[k];
+  await Net.send('lb', 's' + k, { label: 'alive?', cls: 'muted', dur: 600 }); Net.check(ctx);
+  if (s.up) {
+    await Net.send('s' + k, 'lb', { label: 'yes', cls: 'muted', dur: 600 }); Net.check(ctx);
+    s.fails = 0;
+    if (!s.inRot && ++s.oks >= 2) { s.inRot = true; s.oks = 0; }
+  } else {
+    Net.set('s' + k, { badge: 'no reply', badgeCls: 'bad' });
+    await Net.wait(ctx, 700);
+    Net.set('s' + k, { badge: '' });
+    s.oks = 0;
+    if (s.inRot && ++s.fails >= 2) { s.inRot = false; s.fails = 0; }
+  }
+  Net.set('lb', { body: lbHealthHTML() });
+}
+
+async function healthLoop(ctx, flag) {
+  while (flag.on) {
+    await Promise.all(KEYS.map(k => ping(ctx, k)));
+    await Net.wait(ctx, 2600);
+  }
+}
+
+async function trafficLoop(ctx, flag) {
+  let n = 0, rr = 0;
+  while (flag.on) {
+    const rot = KEYS.filter(k => S[k].inRot);
+    const k = rot[rr++ % rot.length];
+    const u = USERS[n % 3];
+    n++;
+    Net.bg(hcRequest(ctx, u, k, `req ${n}`));
+    await Net.wait(ctx, 1100);
+  }
+}
+
+async function hcRequest(ctx, u, k, label) {
+  const cls = userCls(u);
+  await Net.send(u, 'lb', { label, cls, dur: 700 }); Net.check(ctx);
+  await Net.send('lb', 's' + k, { label, cls, dur: 800 }); Net.check(ctx);
+  if (!S[k].up) {
+    Net.flash('s' + k, 'bad');
+    await Net.send('lb', u, { label: '502 error', cls: 'bad', dur: 800 }); Net.check(ctx);
+    return;
+  }
+  Net.flash('s' + k, 'ok');
+  await Net.send('s' + k, 'lb', { label: '✓', cls: 'ok', dur: 600 }); Net.check(ctx);
+  await Net.send('lb', u, { label: '✓', cls: 'ok', dur: 600 }); Net.check(ctx);
+}
+
+function setupHealth() {
+  setupCluster('health check every few seconds');
+  Net.set('lb', { body: lbHealthHTML() });
+  KEYS.forEach(k => Net.set('s' + k, { body: '' }));
+}
+
+async function runHealth(ctx) {
+  const flag = { on: true };
+  Net.bg(healthLoop(ctx, flag));
+  Net.bg(trafficLoop(ctx, flag));
+  Net.say('Every few seconds the load balancer asks each server <b>"are you alive?"</b> (grey pills). User requests go round robin to the servers <b>in rotation</b>.');
+  await Net.beat(ctx, 7000);
+  S.B.up = false;
+  Net.set('sB', { state: 'down' });
+  Net.say('<b>Server B crashes.</b> The load balancer does not know yet...', 'err');
+  await Net.beat(ctx, 3000);
+  Net.say('...so it keeps sending requests to B, and those users get <b>502 errors</b>. B has also stopped answering health checks.', 'err');
+  await until(ctx, () => !S.B.inRot);
+  Net.say('Two health checks in a row got no reply, so B is marked <b>OUT</b> and removed from rotation. The errors stop.', 'win');
+  await Net.beat(ctx, 5000);
+  S.B.up = true;
+  Net.set('sB', { state: '' });
+  Net.say('B is restarted. It answers health checks again, but it has to prove itself first...');
+  await until(ctx, () => S.B.inRot);
+  Net.say('After <b>2 good checks</b> in a row, B is back in rotation and gets traffic again.', 'win');
+  await Net.beat(ctx, 4000);
+  flag.on = false;
+  await Net.wait(ctx, 2500);
+  Net.say('<b>Health checks</b> let the load balancer route around dead servers on its own. The check interval decides how many requests fail before it notices.', 'win');
+}
+
+// ---------- L4 vs L7 ----------
+function setupL47() {
+  Net.group({ x: 20, y: 12, w: 960, h: 222, label: 'Layer 4 (network level)' });
+  Net.node('c4', { x: 120, y: 125, label: 'User', kind: 'client c2' });
+  Net.node('l4', { x: 420, y: 125, label: 'L4 load balancer', sub: 'sees: IP + port only', kind: 'lb', w: 230 });
+  Net.node('t1', { x: 820, y: 62, label: 'Server 1', w: 190 });
+  Net.node('t2', { x: 820, y: 125, label: 'Server 2', w: 190 });
+  Net.node('t3', { x: 820, y: 188, label: 'Server 3', w: 190 });
+  Net.group({ x: 20, y: 262, w: 960, h: 226, label: 'Layer 7 (HTTP level)' });
+  Net.node('c7', { x: 120, y: 375, label: 'User', kind: 'client c1' });
+  Net.node('l7', { x: 420, y: 375, label: 'L7 load balancer', sub: 'reads the HTTP request', kind: 'lb', w: 230 });
+  Net.node('mv', { x: 820, y: 312, label: 'Movie service', w: 190 });
+  Net.node('py', { x: 820, y: 375, label: 'Payment service', w: 190 });
+  Net.node('us', { x: 820, y: 438, label: 'User service', w: 190 });
+  Net.link('c4', 'l4');
+  ['t1', 't2', 't3'].forEach(n => Net.link('l4', n));
+  Net.link('c7', 'l7');
+  ['mv', 'py', 'us'].forEach(n => Net.link('l7', n));
+}
+
+async function runL47(ctx) {
+  Net.say('Two kinds of load balancer. The <b>L4</b> one works on network packets: it only sees the <b>IP address and port</b>. The request itself is encrypted, like a sealed envelope.');
+  await Net.beat(ctx);
+  for (let i = 0; i < 3; i++) {
+    await Net.send('c4', 'l4', { label: '49.36.1.1 → port 443 · sealed', cls: 'c2' });
+    Net.set('l4', { sub: 'sees: 49.36.1.1, port 443' });
+    await Net.send('l4', 't' + (i + 1), { label: 'sealed', cls: 'c2', dur: 800 });
+    Net.flash('t' + (i + 1), 'ok');
+  }
+  Net.say('It cannot tell <code>/movies</code> from <code>/payments</code>, so it just spreads packets over <b>identical servers</b>. Every server must be able to do everything.');
+  await Net.beat(ctx);
+  Net.say('The <b>L7</b> load balancer understands HTTP. It opens the request (it handles HTTPS itself), so it can read the <b>path, headers and cookies</b>.');
+  await Net.beat(ctx);
+  for (const [path, to] of [['GET /movies', 'mv'], ['POST /payments', 'py'], ['GET /users/42', 'us']]) {
+    await Net.send('c7', 'l7', { label: path, cls: 'c1' });
+    Net.set('l7', { sub: 'reading: ' + path });
+    await Net.wait(ctx, 700);
+    await Net.send('l7', to, { label: path, cls: 'c1', dur: 800 });
+    Net.flash(to, 'ok');
+  }
+  Net.say('<b>L4</b>: very fast and simple, works for any TCP/UDP traffic, but blind to what is inside. <b>L7</b>: a little slower, but can route by URL, header or cookie. Microservices need L7 routing, or an API gateway.', 'win');
+}
+
+Net.scenarios([
+  { label: 'Round robin', setup: () => setupCluster('round robin'), run: runRoundRobin },
+  { label: 'Least connections', setup: () => setupCluster('least connections'), run: runLeast },
+  { label: 'IP hash', setup: () => setupCluster('hash(IP) % 3'), run: runHash },
+  { label: 'Health checks', setup: setupHealth, run: runHealth },
+  { label: 'L4 vs L7', setup: setupL47, run: runL47 }
+], 'Several copies of the same server need something in front that decides <b>who handles each request</b>. Pick a scenario above.');
+</script>
+</body>
+</html>

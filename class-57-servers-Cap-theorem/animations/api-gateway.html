@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Gateway</title>
+<link rel="stylesheet" href="net.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>API gateway</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="proxies.html">Proxies</a>
+      <a href="load-balancer.html">Load balancer</a>
+      <a class="on" href="api-gateway.html">API gateway</a>
+      <a href="flow.html">Full flow</a>
+      <a href="replicas.html">Read replicas</a>
+      <a href="stateless.html">Stateless</a>
+      <a href="cap.html">CAP</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div class="row-c" id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = pause / play, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+Net.mount(500);
+const LIMIT = 5;
+let G;
+
+// The gateway box lists its three jobs; each can light up as ok / bad.
+function gwHTML() {
+  const row = (key, text) => `<div class="${G[key] || ''}">${text}</div>`;
+  return `<div class="steps">${row('auth', '1. Auth: valid token?')}${row('rate', `2. Rate limit: ${G.used} of ${LIMIT} per minute`)}${row('route', '3. Route by path' + (G.target ? ': ' + G.target : ''))}</div>`;
+}
+function paintGW(patch) { Object.assign(G, patch); Net.set('gw', { body: gwHTML() }); }
+
+function setupGateway() {
+  G = { auth: '', rate: '', route: '', used: 0, target: '' };
+  Net.node('mob', { x: 110, y: 160, label: 'Mobile app', kind: 'client c1' });
+  Net.node('web', { x: 110, y: 340, label: 'Website', kind: 'client c2' });
+  Net.node('gw', { x: 420, y: 250, label: 'API gateway', sub: 'api.bookmyshow.com', kind: 'gateway', w: 250, body: '' });
+  Net.node('ms', { x: 830, y: 110, label: 'Movie service', sub: '/movies', w: 190 });
+  Net.node('bs', { x: 830, y: 250, label: 'Booking service', sub: '/bookings', w: 190 });
+  Net.node('ps', { x: 830, y: 390, label: 'Payment service', sub: '/payments', w: 190 });
+  Net.link('mob', 'gw');
+  Net.link('web', 'gw');
+  ['ms', 'bs', 'ps'].forEach(n => Net.link('gw', n));
+  paintGW({});
+}
+
+// One request through the gateway. Returns true if it reached a service.
+async function throughGateway(ctx, from, label, o) {
+  const cls = from === 'mob' ? 'c1' : 'c2';
+  await Net.send(from, 'gw', { label, cls }); Net.check(ctx);
+  paintGW({ auth: 'on', rate: '', route: '', target: '' });
+  await Net.wait(ctx, o.fast ? 250 : 800);
+  if (!o.token) {
+    paintGW({ auth: 'bad' });
+    Net.flash('gw', 'bad');
+    await Net.send('gw', from, { label: '401 Unauthorized', cls: 'bad' }); Net.check(ctx);
+    return false;
+  }
+  paintGW({ auth: 'ok', rate: 'on' });
+  await Net.wait(ctx, o.fast ? 250 : 800);
+  if (G.used >= LIMIT) {
+    paintGW({ rate: 'bad' });
+    Net.flash('gw', 'bad');
+    await Net.send('gw', from, { label: '429 Too many requests', cls: 'bad' }); Net.check(ctx);
+    return false;
+  }
+  paintGW({ used: G.used + 1, rate: 'ok', route: 'on', target: o.name });
+  await Net.wait(ctx, o.fast ? 250 : 800);
+  paintGW({ route: 'ok' });
+  await Net.send('gw', o.to, { label, cls }); Net.check(ctx);
+  Net.flash(o.to, 'ok');
+  await Net.send(o.to, 'gw', { label: '200', cls: 'ok', dur: 800 }); Net.check(ctx);
+  await Net.send('gw', from, { label: '200', cls: 'ok', dur: 800 }); Net.check(ctx);
+  return true;
+}
+
+async function runNormal(ctx) {
+  Net.say('The apps only know <b>one address</b>: the API gateway. It is the single front door for every service.');
+  await Net.beat(ctx);
+  Net.say('The website asks for movies, sending its login token.');
+  const ok = throughGateway(ctx, 'web', 'GET /movies · token ✓', { token: true, to: 'ms', name: 'Movie service' });
+  await Net.wait(ctx, 1300);
+  Net.say('The gateway checks the token, then the rate limit, then looks at the path: <code>/movies</code> belongs to the Movie service.');
+  await ok;
+  Net.say('The Movie service only did its real job: returning movies. Auth, limits and routing were all handled <b>once, at the gateway</b>.', 'win');
+  await Net.beat(ctx);
+  Net.say('The mobile app books a seat: the path <code>/bookings</code> goes to a different service.');
+  await throughGateway(ctx, 'mob', 'POST /bookings · token ✓', { token: true, to: 'bs', name: 'Booking service' });
+  Net.say('Same front door, different service, decided by the <b>path</b>.', 'win');
+}
+
+async function runNoToken(ctx) {
+  Net.say('Someone calls the booking API <b>without logging in</b>.');
+  await Net.beat(ctx, 1800);
+  await throughGateway(ctx, 'mob', 'POST /bookings · no token', { token: false, to: 'bs', name: 'Booking service' });
+  Net.say('The gateway rejects it with <b>401</b>. The Booking service <b>never even sees</b> the request, so no service has to write its own login check.', 'err');
+}
+
+async function runBurst(ctx) {
+  Net.say(`The rate limit is <b>${LIMIT} requests per minute</b> per user. A script on the website suddenly fires 8 requests.`);
+  await Net.beat(ctx);
+  const jobs = [];
+  for (let i = 0; i < 8; i++) {
+    const p = throughGateway(ctx, 'web', `GET /movies #${i + 1}`, { token: true, to: 'ms', name: 'Movie service', fast: true });
+    p.catch(() => {});
+    jobs.push(p);
+    await Net.wait(ctx, 900);
+  }
+  await Promise.all(jobs);
+  Net.say(`The first ${LIMIT} went through; the rest got <b>429 Too many requests</b>. The Movie service was protected from the flood.`, 'win');
+}
+
+function setupNoGateway() {
+  const dup = '<div class="steps"><div>auth code</div><div>rate limit code</div><div>logging code</div></div>';
+  Net.node('mob', { x: 110, y: 160, label: 'Mobile app', sub: 'knows 3 addresses', kind: 'client c1' });
+  Net.node('web', { x: 110, y: 340, label: 'Website', sub: 'knows 3 addresses', kind: 'client c2' });
+  Net.node('ms', { x: 760, y: 90, label: 'Movie service', sub: 'movies.internal:8081', w: 220, body: dup });
+  Net.node('bs', { x: 760, y: 250, label: 'Booking service', sub: 'bookings.internal:8082', w: 220, body: dup });
+  Net.node('ps', { x: 760, y: 410, label: 'Payment service', sub: 'payments.internal:8083', w: 220, body: dup });
+  ['mob', 'web'].forEach(c => ['ms', 'bs', 'ps'].forEach(s => Net.link(c, s, { dashed: true })));
+}
+
+async function runNoGateway(ctx) {
+  Net.say('Without a gateway, the apps call every service <b>directly</b>, so they must know every service\'s address.');
+  await Net.beat(ctx);
+  await Promise.all([
+    Net.send('mob', 'ms', { label: 'GET /movies', cls: 'c1' }),
+    Net.send('web', 'bs', { label: 'POST /bookings', cls: 'c2' })
+  ]);
+  Net.check(ctx);
+  Net.flash('ms', 'ok');
+  Net.flash('bs', 'ok');
+  await Net.send('mob', 'ps', { label: 'POST /payments', cls: 'c1' });
+  Net.flash('ps', 'ok');
+  Net.say('And every service has to repeat the <b>same auth, rate limit and logging code</b>. One rule change means changing and redeploying all of them.', 'err');
+  await Net.beat(ctx);
+  Net.say('Adding a 4th service or moving one to a new address? Every app has to be updated. The gateway hides all of that behind <b>one address</b>.', 'win');
+}
+
+function setupVsLB() {
+  Net.node('web', { x: 100, y: 250, label: 'Website', kind: 'client c2' });
+  Net.node('gw', { x: 330, y: 250, label: 'API gateway', sub: 'which service?', kind: 'gateway', w: 190 });
+  Net.node('mlb', { x: 590, y: 150, label: 'Load balancer', sub: 'which copy?', kind: 'lb', w: 170 });
+  Net.node('m1', { x: 860, y: 70, label: 'Movie service #1', w: 190 });
+  Net.node('m2', { x: 860, y: 150, label: 'Movie service #2', w: 190 });
+  Net.node('m3', { x: 860, y: 230, label: 'Movie service #3', w: 190 });
+  Net.node('bs', { x: 700, y: 390, label: 'Booking service', w: 190 });
+  Net.link('web', 'gw');
+  Net.link('gw', 'mlb');
+  Net.link('gw', 'bs');
+  ['m1', 'm2', 'm3'].forEach(n => Net.link('mlb', n));
+}
+
+async function runVsLB(ctx) {
+  Net.say('A common question: are the API gateway and the load balancer the same thing? They work <b>together</b>, one after the other.');
+  await Net.beat(ctx);
+  for (let i = 0; i < 3; i++) {
+    await Net.send('web', 'gw', { label: 'GET /movies', cls: 'c2' });
+    Net.set('gw', { sub: '/movies → Movie service' });
+    await Net.send('gw', 'mlb', { label: 'GET /movies', cls: 'c2', dur: 800 });
+    Net.set('mlb', { sub: `next copy → #${i + 1}` });
+    await Net.send('mlb', 'm' + (i + 1), { label: 'GET /movies', cls: 'c2', dur: 800 });
+    Net.flash('m' + (i + 1), 'ok');
+    if (i === 0) {
+      Net.say('The <b>gateway</b> reads the path and picks the <b>service</b>. The Movie service has 3 copies, so its <b>load balancer</b> picks the <b>copy</b>.');
+      await Net.beat(ctx);
+    }
+  }
+  await Net.send('web', 'gw', { label: 'POST /bookings', cls: 'c2' });
+  Net.set('gw', { sub: '/bookings → Booking service' });
+  await Net.send('gw', 'bs', { label: 'POST /bookings', cls: 'c2', dur: 900 });
+  Net.flash('bs', 'ok');
+  Net.say('<b>Gateway: which service?</b> (plus auth and rate limits). <b>Load balancer: which copy of that service?</b>', 'win');
+}
+
+Net.scenarios([
+  { label: 'A normal request', setup: setupGateway, run: runNormal },
+  { label: 'No login token', setup: setupGateway, run: runNoToken },
+  { label: 'Too many requests', setup: setupGateway, run: runBurst },
+  { label: 'Without a gateway', setup: setupNoGateway, run: runNoGateway },
+  { label: 'Gateway vs load balancer', setup: setupVsLB, run: runVsLB }
+], 'With many microservices, who do the apps talk to? Pick a scenario above.');
+</script>
+</body>
+</html>
