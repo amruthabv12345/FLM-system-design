@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How MongoDB Finds Documents</title>
+<link rel="stylesheet" href="anim.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>How MongoDB finds documents</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="crud.html">CRUD queries</a>
+      <a class="on" href="finding.html">How MongoDB finds documents</a>
+      <a href="together.html">Together vs separately</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div class="split">
+      <div class="panel">
+        <div class="ph"><b>Index</b><span class="sub">a sorted list: value → document</span><span class="sp"></span><span class="pill" id="idxCount"></span></div>
+        <pre class="qbox" id="query"></pre>
+        <div id="idxArea"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><b>Collection</b><span class="sub">products</span><span class="sp"></span><span class="pill" id="docCount"></span></div>
+        <div id="docArea"></div>
+      </div>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = start / pause, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="anim-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+let D, I, entries = 0, docsRead = 0;
+
+const DOCS = [
+  { _id: 1, name: 'Galaxy M34', category: 'phone' },
+  { _id: 2, name: 'Redmi 13', category: 'phone' },
+  { _id: 3, name: 'Classic Shirt', category: 'clothing' },
+  { _id: 4, name: 'Atomic Habits', category: 'book' },
+  { _id: 5, name: 'Pixel 8a', category: 'phone' },
+  { _id: 6, name: 'Cotton Kurta', category: 'clothing' },
+  { _id: 7, name: 'Fit Band', category: 'watch' }
+];
+// The index on category: sorted by category, each entry points to a document's _id.
+const CATEGORY_INDEX = [['book', 4], ['clothing', 3], ['clothing', 6], ['phone', 1], ['phone', 2], ['phone', 5], ['watch', 7]];
+const ID_INDEX = DOCS.map(d => [d._id, 'document ' + d._id]);
+
+function counts(e, d) {
+  entries = e;
+  docsRead = d;
+  $('#idxCount').innerHTML = `Index entries read <b>${e}</b>`;
+  $('#docCount').innerHTML = `Documents read <b>${d}</b>`;
+}
+const setQuery = q => { $('#query').textContent = q; };
+const docAt = id => D.list.findIndex(d => d._id === id);
+
+function setup(indexRows, cols, title) {
+  return () => {
+    $('#idxArea').innerHTML = '';
+    $('#docArea').innerHTML = '';
+    setQuery('');
+    D = A.docs($('#docArea'), 'products', { grid: true }).set(DOCS);
+    if (indexRows) I = A.table($('#idxArea'), title, cols).set(indexRows);
+    else $('#idxArea').innerHTML = '<div class="note">No index on <code>category</code>.<br>MongoDB has nothing to jump with.</div>';
+    counts(0, 0);
+  };
+}
+
+async function runNoIndex(ctx) {
+  A.say('Find all phones, with <b>no index</b> on <code>category</code>.');
+  setQuery('db.products.find({\n  "category": "phone"\n})');
+  await A.beat(ctx);
+  A.say('MongoDB has no idea where the phones are, so it must <b>read every document</b> and check it.');
+  for (let i = 0; i < D.list.length; i++) {
+    D.mark(i, 'check');
+    counts(0, docsRead + 1);
+    await A.wait(ctx, 650);
+    const ok = D.list[i].category === 'phone';
+    D.badge(i, ok ? 'phone ✓' : D.list[i].category + ' ✗', ok ? 'ok' : 'bad');
+    D.mark(i, ok ? 'hit' : 'skip');
+    await A.wait(ctx, 350);
+  }
+  A.say('3 phones found, but <b>all 7 documents</b> were read. With 10 million products, that is 10 million reads. This is a full scan, like SQL without an index.', 'err');
+}
+
+async function runCategoryIndex(ctx) {
+  A.say('First, create an index on <code>category</code>: a <b>sorted list</b> of category → document, kept as a B+ tree (just like class 55).');
+  setQuery('db.products.createIndex({\n  "category": 1\n})');
+  await A.beat(ctx);
+  A.say('Now run the same query.');
+  setQuery('db.products.find({\n  "category": "phone"\n})');
+  await A.beat(ctx, 1800);
+
+  A.say('Jump through the tree straight to the <b>first "phone" entry</b>. The entries above it (book, clothing) are never read.');
+  CATEGORY_INDEX.forEach((r, i) => { if (r[0] < 'phone') I.mark(i, 'skip'); });
+  await A.beat(ctx, 2200);
+
+  for (let i = 0; i < CATEGORY_INDEX.length; i++) {
+    const [cat, id] = CATEGORY_INDEX[i];
+    if (cat < 'phone') continue;
+    I.mark(i, 'check');
+    counts(entries + 1, docsRead);
+    await A.wait(ctx, 700);
+    if (cat !== 'phone') {
+      I.mark(i, 'bad');
+      A.say(`The next entry is <b>"${cat}"</b>. The list is sorted, so no more phones can come after it: <b>stop</b>.`);
+      await A.beat(ctx);
+      break;
+    }
+    I.mark(i, 'hit');
+    const d = docAt(id);
+    D.mark(d, 'hit');
+    D.badge(d, 'fetched via index', 'ok');
+    counts(entries, docsRead + 1);
+    A.say(`Entry "phone" → document ${id}: fetch it. Then read the <b>next</b> entry.`);
+    await A.wait(ctx, 900);
+  }
+
+  D.list.forEach((d, i) => { if (d.category !== 'phone') { D.mark(i, 'skip'); D.badge(i, 'never read', ''); } });
+  A.say('<b>All 3 phones were found</b>: every match is read. The 4 non-phones were <b>never touched</b>. 4 index entries + 3 documents, instead of 7 documents. With 10 million products and 300 phones, it is about 300 reads instead of 10 million.', 'win');
+}
+
+async function runIdIndex(ctx) {
+  A.say('Find one product by its <code>_id</code>. MongoDB creates this index <b>automatically</b> on every collection.');
+  setQuery('db.products.findOne({\n  "_id": 5\n})');
+  await A.beat(ctx);
+  A.say('Jump straight to the entry for <b>5</b>.');
+  ID_INDEX.forEach((r, i) => I.mark(i, r[0] === 5 ? 'check' : 'skip'));
+  counts(1, 0);
+  await A.wait(ctx, 900);
+  const i = ID_INDEX.findIndex(r => r[0] === 5);
+  I.mark(i, 'hit');
+  const d = docAt(5);
+  D.mark(d, 'hit');
+  D.badge(d, 'fetched via _id index', 'ok');
+  D.list.forEach((x, k) => { if (k !== d) { D.mark(k, 'skip'); D.badge(k, 'never read', ''); } });
+  counts(1, 1);
+  await A.beat(ctx);
+  A.say('<code>_id</code> is <b>unique</b>: MongoDB refuses to store two documents with the same <code>_id</code>. So there is exactly one entry for 5, and once it is found there is nothing else to look for. 1 entry, 1 document.', 'win');
+}
+
+A.scenarios([
+  { label: '1. No index: read everything', setup: setup(null), run: runNoIndex },
+  { label: '2. Index on category', setup: setup(CATEGORY_INDEX, ['category', '→ _id'], 'index on category (sorted)'), run: runCategoryIndex },
+  { label: '3. Lookup by _id', setup: setup(ID_INDEX, ['_id', '→ document'], 'index on _id (automatic, unique)'), run: runIdIndex }
+], 'How does MongoDB know which documents to read? It depends on whether there is an <b>index</b> on the field you search.');
+</script>
+</body>
+</html>

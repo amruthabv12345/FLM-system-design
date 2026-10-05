@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MongoDB CRUD</title>
+<link rel="stylesheet" href="anim.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MongoDB CRUD, step by step</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a class="on" href="crud.html">CRUD queries</a>
+      <a href="finding.html">How MongoDB finds documents</a>
+      <a href="together.html">Together vs separately</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Query</div><div id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div class="split">
+      <div class="panel">
+        <div class="ph"><b>mongosh</b><span class="sub">the MongoDB shell</span></div>
+        <div class="term" id="term"></div>
+        <div class="sqlbox" id="sqlBox"><div class="sqlbox-t">The same thing in SQL</div><pre id="sqlCode"></pre></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><b>Collection</b><span class="sub">database shop, collection products</span><span class="sp"></span><span class="pill" id="readCount"></span></div>
+        <div id="coll"></div>
+      </div>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = start / pause, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="anim-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const T = A.term($('#term'));
+let D, reads = 0;
+
+// ---------- an online store: four products of different kinds ----------
+const P1 = { _id: 1, name: 'Galaxy M34', category: 'phone', price: 18999, stock: 12, specs: { ram: 8, battery: 5000 }, tags: ['5G', 'budget'] };
+const P2 = { _id: 2, name: 'Redmi 13', category: 'phone', price: 14999, stock: 0, specs: { ram: 6, battery: 6000 }, tags: ['budget'] };
+const P3 = { _id: 3, name: 'Classic Shirt', category: 'clothing', price: 999, stock: 40, specs: { size: 'M', colour: 'Blue' } };
+const P4 = { _id: 4, name: 'Atomic Habits', category: 'book', price: 499, stock: 7, specs: { author: 'James Clear', pages: 320 } };
+const ALL = [P1, P2, P3, P4];
+
+function countReads(n) {
+  reads = n;
+  $('#readCount').innerHTML = `Documents read <b>${n}</b>`;
+}
+
+// Each query starts from a fixed collection, so it can be replayed on its own.
+function start(docs) {
+  return () => {
+    T.clear();
+    T.print('// connected to the shop database', 'out');
+    $('#sqlCode').textContent = 'appears after the query is run';
+    $('#sqlBox').style.opacity = 0.4;
+    $('#coll').innerHTML = '';
+    D = A.docs($('#coll'), 'products', { grid: true }).set(docs);
+    countReads(0);
+  };
+}
+
+async function ask(ctx, query, sql) {
+  await A.wait(ctx, 300);
+  await T.type(ctx, 'shop> ', query);
+  await A.wait(ctx, 500);
+  $('#sqlCode').textContent = sql;
+  $('#sqlBox').style.opacity = 1;
+}
+
+// No index on the field: every document is read and checked.
+async function scan(ctx, test) {
+  const hits = [];
+  for (let i = 0; i < D.list.length; i++) {
+    D.mark(i, 'check');
+    countReads(reads + 1);
+    await A.wait(ctx, 750);
+    const [ok, why] = test(D.list[i]);
+    D.badge(i, why, ok ? 'ok' : 'bad');
+    D.mark(i, ok ? 'hit' : 'skip');
+    if (ok) hits.push(i);
+    await A.wait(ctx, 450);
+  }
+  return hits;
+}
+
+// Filter on _id: the automatic _id index jumps straight to the one document.
+async function jump(ctx, id) {
+  await A.wait(ctx, 500);
+  let at = -1;
+  D.list.forEach((d, i) => {
+    if (d._id === id) { at = i; D.badge(i, 'found via _id index', 'ok'); D.mark(i, 'hit'); }
+    else { D.badge(i, 'never read', ''); D.mark(i, 'skip'); }
+  });
+  countReads(1);
+  await A.wait(ctx, 900);
+  return at;
+}
+
+const out = obj => T.print(A.fmt(obj), 'out');
+const why = (field, ok, value) => `${field} ${value === undefined ? 'missing' : 'is ' + value} ${ok ? '✓' : '✗'}`;
+
+// ---------- CREATE ----------
+async function insertOne(ctx) {
+  A.say('Add the first product. The collection is empty; it does not even exist yet.');
+  await A.beat(ctx, 2000);
+  await ask(ctx,
+    'db.products.insertOne({\n  "_id": 1,\n  "name": "Galaxy M34",\n  "category": "phone",\n  "price": 18999,\n  "stock": 12,\n  "specs": { "ram": 8, "battery": 5000 },\n  "tags": ["5G", "budget"]\n})',
+    "INSERT INTO products (id, name, category, price, stock)\nVALUES (1, 'Galaxy M34', 'phone', 18999, 12);\n\nINSERT INTO product_attributes (product_id, attr_name, attr_value)\nVALUES (1, 'ram', '8'), (1, 'battery', '5000');\n\nINSERT INTO product_tags (product_id, tag)\nVALUES (1, '5G'), (1, 'budget');");
+  D.insert(P1);
+  out({ acknowledged: true, insertedId: 1 });
+  A.say('One document holds the product, its specs and its tags. In SQL the same data goes into <b>3 tables</b>. (We chose <code>_id: 1</code>; leave it out and MongoDB generates one.)', 'win');
+}
+
+async function insertMany(ctx) {
+  A.say('Add a shirt and a book in one go. Their specs look nothing like a phone\'s.');
+  await A.beat(ctx, 2000);
+  await ask(ctx,
+    'db.products.insertMany([\n  {\n    "_id": 3,\n    "name": "Classic Shirt",\n    "category": "clothing",\n    "price": 999,\n    "stock": 40,\n    "specs": { "size": "M", "colour": "Blue" }\n  },\n  {\n    "_id": 4,\n    "name": "Atomic Habits",\n    "category": "book",\n    "price": 499,\n    "stock": 7,\n    "specs": { "author": "James Clear", "pages": 320 }\n  }\n])',
+    "INSERT INTO products (id, name, category, price, stock)\nVALUES (3, 'Classic Shirt', 'clothing', 999, 40),\n       (4, 'Atomic Habits', 'book', 499, 7);\n\nINSERT INTO product_attributes (product_id, attr_name, attr_value)\nVALUES (3, 'size', 'M'), (3, 'colour', 'Blue'),\n       (4, 'author', 'James Clear'), (4, 'pages', '320');");
+  D.insert(P3);
+  await A.wait(ctx, 500);
+  D.insert(P4);
+  D.lines(2, l => l.includes('"specs"'), 'chg');
+  D.lines(3, l => l.includes('"specs"'), 'chg');
+  out({ acknowledged: true, insertedIds: { '0': 3, '1': 4 } });
+  A.say('Phones, a shirt and a book in <b>one collection</b>, each with its own specs. No <code>NULL</code> columns and no <code>ALTER TABLE</code>.', 'win');
+}
+
+// ---------- READ ----------
+async function findCategory(ctx) {
+  A.say('Find all phones. There is <b>no index</b> on <code>category</code>, so MongoDB must read <b>every document</b> and check it.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.find({\n  "category": "phone"\n})', "SELECT *\nFROM products\nWHERE category = 'phone';");
+  const hits = await scan(ctx, d => [d.category === 'phone', why('category', d.category === 'phone', d.category)]);
+  out(hits.map(i => D.list[i]));
+  A.say('2 phones found, but all 4 documents were read. Same as a full table scan in SQL. (The next page shows how an index avoids this.)', 'win');
+}
+
+async function findLessThan(ctx) {
+  A.say('Find products under ₹1000. <code>$lt</code> means "less than". The others: <code>$lte</code> (≤), <code>$gt</code> (>), <code>$gte</code> (≥), <code>$ne</code> (≠).');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.find({\n  "price": { "$lt": 1000 }\n})', 'SELECT *\nFROM products\nWHERE price < 1000;');
+  const hits = await scan(ctx, d => [d.price < 1000, why('price', d.price < 1000, d.price)]);
+  out(hits.map(i => D.list[i]));
+  A.say('The shirt and the book. Same as <code>WHERE price &lt; 1000</code>.', 'win');
+}
+
+async function findNested(ctx) {
+  A.say('Find products with <b>8 GB RAM or more</b>. RAM sits <b>inside</b> <code>specs</code>, so use a dot: <code>specs.ram</code>.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.find({\n  "specs.ram": { "$gte": 8 }\n})', "SELECT p.*\nFROM products p\nJOIN product_attributes a ON a.product_id = p.id\nWHERE a.attr_name = 'ram'\n  AND CAST(a.attr_value AS UNSIGNED) >= 8;");
+  const hits = await scan(ctx, d => {
+    const ram = d.specs && d.specs.ram;
+    return [ram >= 8, why('specs.ram', ram >= 8, ram)];
+  });
+  hits.forEach(i => D.lines(i, l => l.includes('"specs"'), 'hl'));
+  out(hits.map(i => D.list[i]));
+  A.say('Only the Galaxy. The shirt and the book have no <code>ram</code> at all, so they simply don\'t match. In SQL this needs a join with the attributes table and a cast from text to a number.', 'win');
+}
+
+async function findArray(ctx) {
+  A.say('Find products tagged <b>budget</b>. <code>tags</code> is a list: MongoDB matches if the list <b>contains</b> the value.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.find({\n  "tags": "budget"\n})', "SELECT p.*\nFROM products p\nJOIN product_tags t ON t.product_id = p.id\nWHERE t.tag = 'budget';");
+  const hits = await scan(ctx, d => {
+    if (!d.tags) return [false, 'no tags ✗'];
+    const ok = d.tags.includes('budget');
+    return [ok, ok ? 'tags include budget ✓' : 'no budget tag ✗'];
+  });
+  hits.forEach(i => D.lines(i, l => l.includes('"tags"'), 'hl'));
+  out(hits.map(i => D.list[i]));
+  A.say('Both phones. Searching inside a list needs no join; in SQL the tags are a separate table.', 'win');
+}
+
+async function findProjection(ctx) {
+  A.say('Find phones, but return <b>only the name and price</b>. The second argument picks the fields: this is called a <b>projection</b>.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.find(\n  { "category": "phone" },\n  { "name": 1, "price": 1 }\n)', "SELECT id, name, price\nFROM products\nWHERE category = 'phone';");
+  const hits = await scan(ctx, d => [d.category === 'phone', why('category', d.category === 'phone', d.category)]);
+  hits.forEach(i => D.lines(i, l => l.includes('"name"') || l.includes('"price"') || l.includes('"_id"'), 'hl'));
+  out(hits.map(i => ({ _id: D.list[i]._id, name: D.list[i].name, price: D.list[i].price })));
+  A.say('Only <code>_id</code>, <code>name</code> and <code>price</code> come back (<code>_id</code> is included unless you exclude it). Like listing columns in <code>SELECT</code>.', 'win');
+}
+
+// ---------- UPDATE ----------
+async function updateSet(ctx) {
+  A.say('Lower the Redmi\'s price. The filter is on <code>_id</code>, so the automatic <b>_id index</b> jumps straight to it.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.updateOne(\n  { "_id": 2 },\n  { "$set": { "price": 13999 } }\n)', 'UPDATE products\nSET price = 13999\nWHERE id = 2;');
+  const i = await jump(ctx, 2);
+  const doc = A.clone(D.list[i]);
+  doc.price = 13999;
+  D.replace(i, doc, l => l.includes('"price"'));
+  out({ acknowledged: true, matchedCount: 1, modifiedCount: 1 });
+  A.say('<code>$set</code> changes only the field you name; everything else stays. Only 1 document was read.', 'win');
+}
+
+async function updateInc(ctx) {
+  A.say('A delivery arrives: add 5 to the stock of <b>every</b> phone. <code>updateMany</code> changes all matches; <code>$inc</code> adds to a number.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.updateMany(\n  { "category": "phone" },\n  { "$inc": { "stock": 5 } }\n)', "UPDATE products\nSET stock = stock + 5\nWHERE category = 'phone';");
+  const hits = await scan(ctx, d => [d.category === 'phone', why('category', d.category === 'phone', d.category)]);
+  for (const i of hits) {
+    const doc = A.clone(D.list[i]);
+    doc.stock += 5;
+    D.replace(i, doc, l => l.includes('"stock"'));
+    await A.wait(ctx, 600);
+  }
+  out({ acknowledged: true, matchedCount: 2, modifiedCount: 2 });
+  A.say('Both phones went up by 5 (12 → 17, 0 → 5). Same as <code>SET stock = stock + 5</code>.', 'win');
+}
+
+async function updatePush(ctx) {
+  A.say('Tag the Galaxy as a <b>bestseller</b>. <code>$push</code> adds an item to the end of a list.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.updateOne(\n  { "_id": 1 },\n  { "$push": { "tags": "bestseller" } }\n)', "INSERT INTO product_tags (product_id, tag)\nVALUES (1, 'bestseller');");
+  const i = await jump(ctx, 1);
+  const doc = A.clone(D.list[i]);
+  doc.tags.push('bestseller');
+  D.replace(i, doc, l => l.includes('"tags"'));
+  out({ acknowledged: true, matchedCount: 1, modifiedCount: 1 });
+  A.say('The new tag lives inside the product. In SQL, it is a new row in the separate tags table.', 'win');
+}
+
+// ---------- DELETE ----------
+async function fadeOut(ctx, i) {
+  D.mark(i, 'bad');
+  await A.wait(ctx, 800);
+  D.mark(i, 'gone');
+  await A.wait(ctx, 450);
+  D.remove(i);
+}
+
+async function deleteOne(ctx) {
+  A.say('Remove the shirt. The filter is on <code>_id</code>, so the index jumps straight to it.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.deleteOne({\n  "_id": 3\n})', 'DELETE FROM products\nWHERE id = 3;\n\n-- and its attribute rows:\nDELETE FROM product_attributes\nWHERE product_id = 3;');
+  const i = await jump(ctx, 3);
+  await fadeOut(ctx, i);
+  out({ acknowledged: true, deletedCount: 1 });
+  A.say('The shirt is gone, and its specs went with it because they were inside it. In SQL, its attribute rows need a second delete.', 'win');
+}
+
+async function deleteMany(ctx) {
+  A.say('Remove everything that is <b>out of stock</b>. <code>deleteMany</code> removes every match.');
+  await A.beat(ctx);
+  await ask(ctx, 'db.products.deleteMany({\n  "stock": 0\n})', 'DELETE FROM products\nWHERE stock = 0;');
+  const hits = await scan(ctx, d => [d.stock === 0, why('stock', d.stock === 0, d.stock)]);
+  for (let k = hits.length - 1; k >= 0; k--) await fadeOut(ctx, hits[k]);
+  out({ acknowledged: true, deletedCount: hits.length });
+  A.say('The Redmi (stock 0) is removed. Every document had to be checked, since there is no index on <code>stock</code>.', 'win');
+}
+
+A.scenarios([
+  { group: 'Create', label: 'insertOne', setup: start([]), run: insertOne },
+  { group: 'Create', label: 'insertMany', setup: start([P1, P2]), run: insertMany },
+  { group: 'Read', label: 'find: equals', setup: start(ALL), run: findCategory },
+  { group: 'Read', label: 'find: $lt', setup: start(ALL), run: findLessThan },
+  { group: 'Read', label: 'find: nested field', setup: start(ALL), run: findNested },
+  { group: 'Read', label: 'find: inside a list', setup: start(ALL), run: findArray },
+  { group: 'Read', label: 'find: some fields', setup: start(ALL), run: findProjection },
+  { group: 'Update', label: 'updateOne: $set', setup: start(ALL), run: updateSet },
+  { group: 'Update', label: 'updateMany: $inc', setup: start(ALL), run: updateInc },
+  { group: 'Update', label: 'updateOne: $push', setup: start(ALL), run: updatePush },
+  { group: 'Delete', label: 'deleteOne', setup: start(ALL), run: deleteOne },
+  { group: 'Delete', label: 'deleteMany', setup: start(ALL), run: deleteMany }
+], 'An online store with a <code>products</code> collection. Pick a query: it is typed into the shell, then you watch what MongoDB does to the documents.');
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class 58 Animations</title>
+<link rel="stylesheet" href="anim.css">
+<style>
+.intro { color: var(--muted); margin: 0 0 16px; }
+.list { display: grid; gap: 12px; }
+.topic { display: flex; gap: 16px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+.num { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--bg); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.topic h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.topic p { margin: 0; color: var(--muted); }
+.topic a { margin-left: auto; flex: none; text-decoration: none; padding: 7px 14px; border-radius: 8px; background: var(--teal); color: #fff; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Class 58: NoSQL and MongoDB</h1>
+    <nav class="pages">
+      <a class="on" href="index.html">Overview</a>
+      <a href="crud.html">CRUD queries</a>
+      <a href="finding.html">How MongoDB finds documents</a>
+      <a href="together.html">Together vs separately</a>
+    </nav>
+  </header>
+  <p class="intro">An online store with a <code>products</code> collection, used across all three pages.</p>
+  <div class="list">
+    <div class="topic"><span class="num">1</span><div><h2>CRUD queries</h2><p>insertOne, insertMany, find (equals, $lt, nested field, inside a list, some fields), updateOne $set, updateMany $inc, $push, deleteOne, deleteMany. Each one typed into the shell, with its SQL equivalent.</p></div><a href="crud.html">Open</a></div>
+    <div class="topic"><span class="num">2</span><div><h2>How MongoDB finds documents</h2><p>No index: every document is read. Index on a field: all matches are read, everything else is skipped. Lookup by _id: exactly one.</p></div><a href="finding.html">Open</a></div>
+    <div class="topic"><span class="num">3</span><div><h2>Together vs separately</h2><p>SQL tables vs MongoDB documents on the same task, with the bookshelf: how many books (B+ trees) each side opens. Product page and delete: MongoDB wins. Shared data that changes: SQL wins. References: use both.</p></div><a href="together.html">Open</a></div>
+  </div>
+</div>
+</body>
+</html>

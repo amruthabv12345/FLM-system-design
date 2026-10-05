@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Together vs Separately</title>
+<link rel="stylesheet" href="anim.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Store together or store separately?</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a href="crud.html">CRUD queries</a>
+      <a href="finding.html">How MongoDB finds documents</a>
+      <a class="on" href="together.html">Together vs separately</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Scenario</div><div id="scen"></div></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div class="split">
+      <div class="panel" id="sqlP">
+        <div class="ph"><b>SQL</b><span class="sub">stored separately, linked by ids</span><span class="sp"></span><span id="sqlWin"></span><span class="pill" id="sqlCount"></span></div>
+        <pre class="qbox" id="sqlQ"></pre>
+        <div id="sqlArea"></div>
+      </div>
+      <div class="panel" id="mgP">
+        <div class="ph"><b>MongoDB</b><span class="sub">stored together in one document</span><span class="sp"></span><span id="mgWin"></span><span class="pill" id="mgCount"></span></div>
+        <pre class="qbox" id="mgQ"></pre>
+        <div id="mgArea"></div>
+      </div>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = start / pause, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="anim-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const sqlArea = $('#sqlArea'), mgArea = $('#mgArea');
+let V = {};
+
+function counter(side, html) {
+  const el = $('#' + side + 'Count');
+  el.style.display = html ? '' : 'none';
+  el.innerHTML = html || '';
+}
+// Counter for the bookshelf: how many books (B+ trees) were opened, and pages read in total.
+const books = side => counter(side, `Books opened <b>${V[side + 'Shelf'].places}</b> · Page reads <b>${V[side + 'Shelf'].pages}</b>`);
+const setQ = (side, text) => { $('#' + side + 'Q').textContent = text; };
+
+function verdict(side) {
+  ['sql', 'mg'].forEach(s => {
+    const won = side === s || side === 'both';
+    $('#' + s + 'P').classList.toggle('win', won);
+    $('#' + s + 'Win').innerHTML = won ? `<span class="verdict">${side === 'both' ? 'use both' : 'better here'}</span>` : '';
+  });
+}
+function reset() {
+  sqlArea.innerHTML = '';
+  mgArea.innerHTML = '';
+  verdict(null);
+  counter('sql', '');
+  counter('mg', '');
+  setQ('sql', '');
+  setQ('mg', '');
+  V = {};
+}
+async function fadeOut(ctx, view, i) {
+  view.mark(i, 'gone');
+  await A.wait(ctx, 450);
+  view.remove(i);
+}
+
+// ---------- products and their specs ----------
+const PRODUCTS = [[1, 'Galaxy M34', 'phone', 18999], [2, 'Redmi 13', 'phone', 14999], [3, 'Classic Shirt', 'clothing', 999]];
+const ATTRS = [[1, 'ram', '8GB'], [1, 'battery', '5000mAh'], [1, 'screen', '6.5 in'], [2, 'ram', '6GB'], [2, 'battery', '6000mAh'], [3, 'size', 'M'], [3, 'colour', 'Blue']];
+const PRODUCT_DOCS = [
+  { _id: 1, name: 'Galaxy M34', category: 'phone', price: 18999, specs: { ram: '8GB', battery: '5000mAh', screen: '6.5 in' } },
+  { _id: 2, name: 'Redmi 13', category: 'phone', price: 14999, specs: { ram: '6GB', battery: '6000mAh' } },
+  { _id: 3, name: 'Classic Shirt', category: 'clothing', price: 999, specs: { size: 'M', colour: 'Blue' } }
+];
+
+function setupProducts(withResult) {
+  return () => {
+    reset();
+    V.p = A.table(sqlArea, 'products', ['id', 'name', 'category', 'price']).set(PRODUCTS);
+    V.a = A.table(sqlArea, 'product_attributes', ['product_id', 'attr_name', 'attr_value']).set(ATTRS);
+    V.d = A.docs(mgArea, 'products').set(PRODUCT_DOCS);
+    if (withResult) {
+      V.sr = A.result(sqlArea, 'What the product page gets');
+      V.mr = A.result(mgArea, 'What the product page gets');
+    }
+    V.sqlShelf = A.shelf(sqlArea, 'On disk: each table is its own book (B+ tree)', ['products', 'product_attributes']);
+    V.mgShelf = A.shelf(mgArea, 'On disk: the collection is one book (B+ tree)', ['products']);
+  };
+}
+
+async function runPage(ctx) {
+  books('sql');
+  books('mg');
+  setQ('sql', 'SELECT p.*, a.attr_name, a.attr_value\nFROM products p\nJOIN product_attributes a ON a.product_id = p.id\nWHERE p.id = 1;');
+  setQ('mg', 'db.products.findOne({\n  "_id": 1\n})');
+  A.say('Show the product page for <b>Galaxy M34</b> (id 1). The page needs the product <b>and all its specs</b>.');
+  await A.beat(ctx);
+
+  A.say('Neither side scans: both have an <b>index on the id</b>, so each jumps straight to product 1. Dimmed rows are <b>never read</b>. What matters is <b>how many books</b> each side has to open.');
+  await A.beat(ctx);
+
+  A.say('<b>SQL, book 1:</b> open the <code>products</code> book and jump to row 1.');
+  V.p.find(r => r[0] !== 1).forEach(i => V.p.mark(i, 'skip'));
+  V.p.mark(0, 'hit');
+  V.sqlShelf.open(0);
+  books('sql');
+  const built = { name: 'Galaxy M34', category: 'phone', price: 18999 };
+  V.sr.set(built, () => true);
+  await A.beat(ctx, 2400);
+
+  A.say('<b>SQL, book 2:</b> the specs are not in this book. Walk to a <b>second shelf</b>, open <code>product_attributes</code>, jump to product 1\'s rows, and put the pieces together.');
+  V.a.find(r => r[0] !== 1).forEach(i => V.a.mark(i, 'skip'));
+  V.sqlShelf.open(1);
+  books('sql');
+  built.specs = {};
+  for (const i of V.a.find(r => r[0] === 1)) {
+    const r = V.a.rows[i];
+    V.a.mark(i, 'hit');
+    built.specs[r[1]] = r[2];
+    V.sr.set(built, l => l.includes('"' + r[1] + '"'));
+    await A.wait(ctx, 1000);
+  }
+  await A.beat(ctx);
+
+  A.say('<b>MongoDB, book 1:</b> open the <code>products</code> book and jump to document 1. The specs are <b>on the same page</b>: nothing else to fetch.');
+  V.d.list.forEach((d, i) => {
+    if (d._id === 1) { V.d.mark(i, 'hit'); V.d.badge(i, 'found via _id index', 'ok'); }
+    else V.d.mark(i, 'skip');
+  });
+  V.mgShelf.open(0);
+  books('mg');
+  const whole = A.clone(PRODUCT_DOCS[0]);
+  delete whole._id;
+  V.mr.set(whole, () => true);
+  await A.beat(ctx);
+
+  verdict('mg');
+  A.say('<b>MongoDB is better here: 1 book instead of 2, 3 page reads instead of 6.</b> Reading lines on a page you already have open is free; walking to another shelf is the cost. The specs belong only to this product, so splitting them out only added that walk.', 'win');
+}
+
+async function runDelete(ctx) {
+  books('sql');
+  books('mg');
+  setQ('sql', 'DELETE FROM products WHERE id = 2;\n\nDELETE FROM product_attributes WHERE product_id = 2;');
+  setQ('mg', 'db.products.deleteOne({\n  "_id": 2\n})');
+  A.say('Delete the product <b>Redmi 13</b> (id 2). Both sides find it through the id index.');
+  await A.beat(ctx);
+
+  A.say('<b>SQL</b> opens the <code>products</code> book and deletes the row...');
+  V.sqlShelf.open(0);
+  books('sql');
+  V.p.mark(1, 'bad');
+  await A.wait(ctx, 900);
+  await fadeOut(ctx, V.p, 1);
+  await A.beat(ctx, 2000);
+
+  const orphans = V.a.find(r => r[0] === 2);
+  orphans.forEach(i => V.a.mark(i, 'orphan'));
+  A.say('...but its <b>2 attribute rows</b> are still in the other book, pointing at a product that no longer exists. They must be deleted too.', 'err');
+  await A.beat(ctx);
+  V.sqlShelf.open(1);
+  books('sql');
+  for (let k = orphans.length - 1; k >= 0; k--) {
+    await fadeOut(ctx, V.a, orphans[k]);
+    await A.wait(ctx, 300);
+  }
+  A.say('SQL deleted <b>3 rows in 2 books</b>. (<code>ON DELETE CASCADE</code> can do the second delete for you, but the work still happens.)');
+  await A.beat(ctx);
+
+  A.say('<b>MongoDB</b> deletes <b>one document</b>, and the specs go with it, because they were inside it.');
+  V.mgShelf.open(0);
+  books('mg');
+  V.d.mark(1, 'bad');
+  await A.wait(ctx, 900);
+  await fadeOut(ctx, V.d, 1);
+  await A.beat(ctx);
+
+  verdict('mg');
+  A.say('<b>MongoDB is better here.</b> The specs live and die with their product. Kept inside it, nothing can be left behind.', 'win');
+}
+
+// ---------- movies and actors: shared data ----------
+const MOVIES = [[1, 'Jawan'], [2, 'Pathaan'], [3, 'Dunki']];
+const ACTORS = [[10, 'Shah Rukh Khan'], [11, 'Deepika Padukone']];
+const MOVIE_ACTORS = [[1, 10], [2, 10], [2, 11], [3, 10]];
+
+function setupSqlMovies() {
+  V.mv = A.table(sqlArea, 'movies', ['id', 'title']).set(MOVIES);
+  V.ac = A.table(sqlArea, 'actors', ['id', 'name']).set(ACTORS);
+  V.ma = A.table(sqlArea, 'movie_actors', ['movie_id', 'actor_id']).set(MOVIE_ACTORS);
+  V.sqlShelf = A.shelf(sqlArea, 'On disk', ['movies', 'actors', 'movie_actors']);
+}
+
+function setupEmbedded() {
+  reset();
+  setupSqlMovies();
+  V.md = A.docs(mgArea, 'movies').set([
+    { _id: 1, title: 'Jawan', cast: ['Shah Rukh Khan'] },
+    { _id: 2, title: 'Pathaan', cast: ['Shah Rukh Khan', 'Deepika Padukone'] },
+    { _id: 3, title: 'Dunki', cast: ['Shah Rukh Khan'] }
+  ]);
+  V.mgShelf = A.shelf(mgArea, 'On disk', ['movies']);
+}
+
+async function runRename(ctx) {
+  counter('sql', 'Changed <b>0</b>');
+  counter('mg', 'Changed <b>0</b>');
+  setQ('sql', "UPDATE actors\nSET name = 'SRK'\nWHERE id = 10;");
+  setQ('mg', 'db.movies.updateMany(\n  { "cast": "Shah Rukh Khan" },\n  { "$set": { "cast.$": "SRK" } }\n)');
+  A.say('An actor\'s name changes: <b>Shah Rukh Khan</b> becomes <b>SRK</b>. He appears in 3 movies.');
+  await A.beat(ctx);
+
+  A.say('<b>SQL</b> changes <b>one row</b> in <code>actors</code>.');
+  V.ac.mark(0, 'hit');
+  V.ac.cell(0, 1, 'SRK');
+  counter('sql', 'Changed <b>1 row</b>');
+  await A.beat(ctx, 2200);
+  V.ma.find(r => r[1] === 10).forEach(i => V.ma.mark(i, 'link'));
+  A.say('Every movie points to actor <b>10</b> by id, so all 3 movies now show the new name automatically.');
+  await A.beat(ctx);
+
+  A.say('<b>MongoDB</b> copied the name into every movie, so <b>each document</b> has to change.');
+  for (let i = 0; i < V.md.list.length; i++) {
+    V.md.mark(i, 'check');
+    await A.wait(ctx, 600);
+    const doc = A.clone(V.md.list[i]);
+    doc.cast = doc.cast.map(n => n === 'Shah Rukh Khan' ? 'SRK' : n);
+    V.md.replace(i, doc, l => l.includes('SRK'));
+    V.md.mark(i, 'hit');
+    counter('mg', `Changed <b>${i + 1} document${i ? 's' : ''}</b>`);
+    await A.wait(ctx, 700);
+  }
+  A.say('<b>3 changes instead of 1.</b> With 300 movies it would be 300, and if one is missed, the data disagrees.', 'err');
+  await A.beat(ctx);
+
+  verdict('sql');
+  A.say('<b>SQL is better here.</b> The actor is <b>shared</b> by many movies and his name can change. Store him once, and point to him by id.', 'win');
+}
+
+function setupReferenced() {
+  reset();
+  setupSqlMovies();
+  V.md = A.docs(mgArea, 'movies').set([
+    { _id: 1, title: 'Jawan', cast_ids: [10] },
+    { _id: 2, title: 'Pathaan', cast_ids: [10, 11] },
+    { _id: 3, title: 'Dunki', cast_ids: [10] }
+  ]);
+  V.ad = A.docs(mgArea, 'actors').set([
+    { _id: 10, name: 'Shah Rukh Khan' },
+    { _id: 11, name: 'Deepika Padukone' }
+  ]);
+  V.mgShelf = A.shelf(mgArea, 'On disk', ['movies', 'actors']);
+}
+
+async function runReferenced(ctx) {
+  A.say('MongoDB can store <b>references</b> too. Each movie keeps only the <b>actor ids</b>, and actors get their own collection.');
+  await A.beat(ctx);
+
+  counter('sql', 'Changed <b>0</b>');
+  counter('mg', 'Changed <b>0</b>');
+  setQ('sql', "UPDATE actors\nSET name = 'SRK'\nWHERE id = 10;");
+  setQ('mg', 'db.actors.updateOne(\n  { "_id": 10 },\n  { "$set": { "name": "SRK" } }\n)');
+  A.say('The name changes again: <b>Shah Rukh Khan</b> becomes <b>SRK</b>.');
+  await A.beat(ctx, 1800);
+  V.ac.mark(0, 'hit');
+  V.ac.cell(0, 1, 'SRK');
+  counter('sql', 'Changed <b>1 row</b>');
+  V.ad.replace(0, { _id: 10, name: 'SRK' }, l => l.includes('SRK'));
+  V.ad.mark(0, 'hit');
+  counter('mg', 'Changed <b>1 document</b>');
+  A.say('Now both change <b>one place</b>.');
+  await A.beat(ctx);
+
+  V.ac.set(V.ac.rows);
+  V.ad.set(V.ad.list);
+  setQ('sql', 'SELECT m.title, a.name\nFROM movies m\nJOIN movie_actors ma ON ma.movie_id = m.id\nJOIN actors a ON a.id = ma.actor_id\nWHERE m.id = 1;');
+  setQ('mg', 'const movie = db.movies.findOne({ "_id": 1 })\n\ndb.actors.find({\n  "_id": { "$in": movie.cast_ids }\n})');
+  books('sql');
+  books('mg');
+  A.say('The price: showing <b>Jawan with its cast</b> now needs more than one book on both sides.');
+  await A.beat(ctx, 2000);
+  V.mv.mark(0, 'hit'); V.sqlShelf.open(0); books('sql'); await A.wait(ctx, 700);
+  V.ma.mark(0, 'hit'); V.sqlShelf.open(2); books('sql'); await A.wait(ctx, 700);
+  V.ac.mark(0, 'hit'); V.sqlShelf.open(1); books('sql'); await A.wait(ctx, 700);
+  V.md.mark(0, 'hit'); V.mgShelf.open(0); books('mg'); await A.wait(ctx, 700);
+  V.ad.mark(0, 'hit'); V.mgShelf.open(1); books('mg');
+  A.say('SQL opens 3 books (with a join). MongoDB opens 2: the movie, then the actor by id. The app does that second lookup itself.');
+  await A.beat(ctx);
+
+  verdict('both');
+  A.say('<b>Use both ideas.</b> Embed what belongs to one thing and is read with it (a product\'s specs, a movie\'s reviews). Reference by id what is shared and changes on its own (actors, users).', 'win');
+}
+
+A.scenarios([
+  { label: '1. Show a product page', setup: setupProducts(true), run: runPage },
+  { label: '2. Delete a product', setup: setupProducts(false), run: runDelete },
+  { label: '3. An actor changes name', setup: setupEmbedded, run: runRename },
+  { label: '4. MongoDB with references', setup: setupReferenced, run: runReferenced }
+], 'Should data be stored <b>separately</b> (SQL tables linked by ids) or <b>together</b> (one MongoDB document)? Each scenario runs the same action on both sides, with the real queries.');
+</script>
+</body>
+</html>
