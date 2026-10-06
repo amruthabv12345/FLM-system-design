@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat App: SQL vs MongoDB</title>
+<link rel="stylesheet" href="net.css">
+<link rel="stylesheet" href="chat.css">
+<style>
+.dgrid.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dgrid.two .dcard { margin: 0; }
+.rws.compact { display: flex; flex-wrap: wrap; gap: 5px; }
+.rws.compact .rw { margin: 0; }
+.story { padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--purple-bg); font-size: 16px; line-height: 1.6; }
+.story b { color: var(--purple); }
+.story .ask { display: block; margin-top: 4px; }
+.story .q { display: block; margin-top: 10px; padding: 10px 14px; border-radius: 10px; background: var(--panel); border: 2px dashed var(--amber); font-size: 17px; font-weight: 600; }
+.story .q b { color: var(--amber); }
+.answer { padding: 16px 18px; border-top: 1px solid var(--line); background: var(--good-bg); }
+.ans-h { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--good); }
+.answer ul { margin: 10px 0 0; padding-left: 22px; font-size: 16px; line-height: 1.7; }
+.answer ul.hidden { display: none; }
+.answer li.win { list-style: none; margin: 8px 0 0 -22px; font-weight: 800; }
+.answer li.win span { padding: 3px 12px; border-radius: 999px; background: var(--good); color: #fff; }
+.queries.final .qt { color: var(--teal); }
+.fpanel { min-width: 0; }
+.fcap { color: var(--muted); font-size: 13px; font-weight: 600; margin: 4px 0 8px; }
+.tname { font: 700 15px ui-monospace, Menlo, Consolas, monospace; margin: 0 0 6px; }
+.ft { border-collapse: separate; border-spacing: 0; margin: 0 0 18px; font-size: 15px; background: var(--panel); border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; }
+.ft th { background: var(--purple-bg); color: var(--purple); font: 700 13px ui-monospace, Menlo, Consolas, monospace; text-align: left; padding: 8px 16px; }
+.ft td { padding: 8px 16px; border-top: 1px solid var(--line); white-space: nowrap; }
+.ft tr:nth-child(odd) td { background: var(--soft); }
+.ft td.null { color: var(--muted); font-style: italic; }
+.doc { margin: 0 0 12px; padding: 12px 16px; border-radius: 10px; border-left: 4px solid var(--good); background: #15191e; color: #e7e5df; font: 14px/1.6 ui-monospace, Menlo, Consolas, monospace; white-space: pre; overflow-x: auto; }
+.doc .jk { color: #8ab4f8; } .doc .js { color: #a8d8a0; } .doc .jn { color: #f5c06b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>A chat app: SQL vs MongoDB</h1>
+    <nav class="pages">
+      <a href="index.html">Overview</a>
+      <a class="on" href="chat.html">Chat app</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Step</div><div class="row-c" id="scen"></div></div>
+    <div class="story" id="story"></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="queries" id="queries">
+      <div><div class="qt">SQL query</div><pre id="sqlQ"></pre></div>
+      <div><div class="qt">MongoDB query</div><pre id="mgQ"></pre></div>
+    </div>
+    <div class="queries final" id="final">
+      <div><div class="qt" id="sqlFT">SQL tables after this step</div><div class="fpanel" id="sqlF"></div></div>
+      <div><div class="qt" id="mgFT">MongoDB documents after this step</div><div class="fpanel" id="mgF"></div></div>
+    </div>
+    <div class="answer" id="answer">
+      <div class="ans-h"><span>The answer</span><button id="bAns">Show answer</button></div>
+      <ul id="ansList"></ul>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = start / pause, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+Net.mount(676, 1.1);
+
+// ---------- the people and their reactions ----------
+const EMO = { like: '👍', love: '❤️', laugh: '😂', wow: '😮' };
+const TS = 14, TM = 346, LS = TS + 158, LM = TM + 158;   // lane tops and lane centres
+
+// ---------- small view helpers ----------
+const T = {}, D = {};
+const setQ = (side, text) => { $('#' + side + 'Q').textContent = text || ''; };
+// The "final data" panel: SQL tables drawn as text, MongoDB documents as formatted JSON.
+const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const cap = t => `<div class="fcap">${t}</div>`;
+function tbl(name, cols, rows) {
+  const head = '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  const body = rows.length
+    ? rows.map(r => '<tr>' + r.map(v => `<td class="${v === 'NULL' ? 'null' : ''}">${esc(v)}</td>`).join('') + '</tr>').join('')
+    : `<tr><td class="null" colspan="${cols.length}">empty</td></tr>`;
+  return `<div class="tname">${name}</div><table class="ft">${head}${body}</table>`;
+}
+// JSON with colours; small objects stay on one line so a document reads like a card.
+function jh(v, ind) {
+  if (v === null || typeof v !== 'object') return typeof v === 'string' ? `<span class="js">"${esc(v)}"</span>` : `<span class="jn">${v}</span>`;
+  const arr = Array.isArray(v);
+  const items = arr ? v.map(x => jh(x, ind + '  ')) : Object.keys(v).map(k => `<span class="jk">"${k}"</span>: ` + jh(v[k], ind + '  '));
+  const o = arr ? '[' : '{', c = arr ? ']' : '}';
+  if (!items.length) return o + c;
+  if (ind && JSON.stringify(v).length <= 44) return o + ' ' + items.join(', ') + ' ' + c;
+  return o + '\n' + items.map(t => ind + '  ' + t).join(',\n') + '\n' + ind + c;
+}
+const json = v => (Array.isArray(v) ? v : [v]).map(d => `<pre class="doc">${jh(d, '')}</pre>`).join('');
+function setF(sqlHTML, mgHTML, sqlTitle, mgTitle) {
+  $('#final').classList.toggle('hidden', !sqlHTML && !mgHTML);
+  $('#sqlF').innerHTML = sqlHTML || '';
+  $('#mgF').innerHTML = mgHTML || '';
+  $('#sqlFT').textContent = sqlTitle || 'SQL tables after this step';
+  $('#mgFT').textContent = mgTitle || 'MongoDB documents after this step';
+}
+const MCOLS = ['id', 'sender', 'text'], RCOLS = ['message_id', 'user', 'emoji'];
+const screen = html => `<div class="screen">${html}</div>`;
+const chips = rx => `<div class="rxs">${rx.map(r => `<span class="re ${r.s || ''}">${EMO[r.e]} ${r.u}</span>`).join('')}</div>`;
+const bubble = (text, rx) => `<div class="bubble">${text}${rx && rx.length ? chips(rx) : ''}</div>`;
+const big = (v, unit) => `<div class="big">${v}<small>${unit || ''}</small></div>`;
+
+function lanes(sqlLabel, mgLabel) {
+  Net.group({ x: 16, y: TS, w: 968, h: 318, label: sqlLabel || 'SQL: separate tables' });
+  Net.group({ x: 16, y: TM, w: 968, h: 318, label: mgLabel || 'MongoDB: one document per message' });
+}
+function app(id, x, y) {
+  Net.node(id, { x, y, label: 'Chat app', kind: 'client', w: 200, body: screen('<span class="wait-t">waiting…</span>') });
+}
+function show(id, html) { Net.set(id, { body: screen(html) }); }
+function counter(id, x, y, label, v, unit) { Net.node(id, { x, y, label, kind: 'count', w: 150, body: big(v, unit) }); }
+function setC(id, label, v, unit) { Net.set(id, { label, body: big(v, unit) }); }
+const win = (...ids) => ids.forEach(id => Net.set(id, { state: 'win' }));
+
+// A table: rows are shown as chips; each row has a state (new, read, bad, dim, link, gone).
+function rowsHTML(id) {
+  const rows = T[id].rows;
+  if (!rows.length) return '<div class="none">empty</div>';
+  return `<div class="rws ${T[id].compact ? 'compact' : ''}">${rows.map(r => `<div class="rw ${r.s}">${r.t}</div>`).join('')}</div>`;
+}
+function table(id, x, y, title, cols, rows, o = {}) {
+  T[id] = { rows: rows.map(t => ({ t, s: '' })), compact: o.compact };
+  Net.node(id, { x, y, label: title, sub: cols, kind: 'db', w: o.w || 300, body: rowsHTML(id) });
+}
+const paintT = id => Net.set(id, { body: rowsHTML(id) });
+function addRow(id, t) { T[id].rows.push({ t, s: 'new' }); paintT(id); }
+function markRows(id, test, s) { T[id].rows.forEach((r, i) => { if (test(r, i)) r.s = s; }); paintT(id); }
+async function dropRows(ctx, id, test) {
+  markRows(id, test, 'bad');
+  await Net.wait(ctx, 700);
+  markRows(id, test, 'gone');
+  await Net.wait(ctx, 450);
+  T[id].rows = T[id].rows.filter((r, i) => !test(r, i));
+  paintT(id);
+}
+
+// A collection: each document is a card (text + reaction chips inside it).
+function docHTML(d) {
+  const main = d.voice ? `🎤 voice note · ${d.voice} s` : (d.poll ? '📊 ' : '') + `“${d.text}”`;
+  return `<div class="dcard ${d.s || ''}"><div class="dh"><span>document ${d.id}</span>${d.tag ? `<span class="tag">${d.tag}</span>` : ''}</div>`
+    + `<div class="dt">${main} <span style="font-weight: 400; color: var(--muted)">· ${d.from}</span></div>`
+    + (d.poll ? `<div class="rxs">${d.poll.map(o => `<span class="re new">🗳 ${o}</span>`).join('')}</div>` : '')
+    + (d.rx && d.rx.length ? chips(d.rx) : '') + '</div>';
+}
+function collection(id, x, y, docs, o = {}) {
+  D[id] = { docs, grid: o.grid };
+  Net.node(id, { x, y, label: o.title || 'messages', sub: 'collection', kind: 'lb', w: o.w || 340, body: docsHTML(id) });
+}
+function docsHTML(id) {
+  const c = D[id];
+  return c.docs.length ? `<div class="dgrid ${c.grid ? 'two' : ''}">${c.docs.map(docHTML).join('')}</div>` : '<div class="none">empty</div>';
+}
+const paintD = id => Net.set(id, { body: docsHTML(id) });
+
+const say = (html, kind) => Net.say(html, kind);
+const send = (a, b, label, cls, dur) => Net.send(a, b, { label, cls: cls || '', dur: dur || 1100 });
+
+// ================= Step 1: send a message, then a reaction arrives later =================
+function setup1() {
+  lanes();
+  app('sA', 140, LS);
+  table('msgs', 520, TS + 77, 'messages table', 'id · sender · text', []);
+  table('rx', 520, TS + 220, 'reactions table', 'message · user · emoji', []);
+  counter('sC', 870, LS, 'Writes', 0);
+  Net.link('sA', 'msgs');
+  Net.link('sA', 'rx');
+  app('mA', 140, LM);
+  collection('col', 520, LM, []);
+  counter('mC', 870, LM, 'Writes', 0);
+  Net.link('mA', 'col');
+  setQ('sql', "INSERT INTO messages (id, sender, text)\nVALUES (101, 'Rahul', 'Movie tonight?');\n\n-- a minute later, Aman reacts:\nINSERT INTO reactions (message_id, user, emoji)\nVALUES (101, 'Aman', 'like');");
+  setF(tbl('messages', MCOLS, [[101, 'Rahul', 'Movie tonight?']]) + tbl('reactions', RCOLS, [[101, 'Aman', 'like']]),
+    cap('collection: messages') + json({ _id: 101, from: 'Rahul', text: 'Movie tonight?', reactions: [{ user: 'Aman', emoji: 'like' }] }));
+  setQ('mg', 'db.messages.insertOne({\n  "_id": 101,\n  "from": "Rahul",\n  "text": "Movie tonight?"\n})\n\n// a minute later, Aman reacts:\ndb.messages.updateOne(\n  { "_id": 101 },\n  { "$push": { "reactions": { "user": "Aman", "emoji": "like" } } }\n)');
+}
+async function run1(ctx) {
+  show('sA', bubble('Movie tonight?'));
+  show('mA', bubble('Movie tonight?'));
+  say('Rahul sends <b>“Movie tonight?”</b>. Both sides save the new message.');
+  await Net.beat(ctx);
+
+  say('<b>Write 1, on both sides:</b> SQL adds a row to the messages table; MongoDB adds a new document.');
+  await Promise.all([send('sA', 'msgs', 'INSERT message'), send('mA', 'col', 'insertOne message')]);
+  Net.check(ctx);
+  addRow('msgs', '101 · Rahul · “Movie tonight?”');
+  D.col.docs = [{ id: 101, from: 'Rahul', text: 'Movie tonight?', rx: [], s: 'new' }];
+  paintD('col');
+  setC('sC', 'Writes', 1);
+  setC('mC', 'Writes', 1);
+  await Net.beat(ctx);
+
+  show('sA', bubble('Movie tonight?', [{ u: 'Aman', e: 'like', s: 'new' }]));
+  show('mA', bubble('Movie tonight?', [{ u: 'Aman', e: 'like', s: 'new' }]));
+  say('<b>A minute later</b>, Aman reacts 👍. It is a separate event, so it is a <b>separate write</b> on both sides.');
+  await Net.beat(ctx, 2200);
+
+  say('<b>SQL</b> inserts a new row into the reactions table. <b>MongoDB</b> updates the message document: the reaction goes <b>inside</b> it, so the document is rewritten.');
+  await Promise.all([send('sA', 'rx', 'INSERT reaction'), send('mA', 'col', 'updateOne: $push reaction')]);
+  Net.check(ctx);
+  addRow('rx', '101 · Aman · 👍');
+  D.col.docs[0] = { id: 101, from: 'Rahul', text: 'Movie tonight?', rx: [{ u: 'Aman', e: 'like', s: 'new' }], s: 'rewrite', tag: 'rewritten' };
+  paintD('col');
+  setC('sC', 'Writes', 2, 'insert + insert');
+  setC('mC', 'Writes', 2, 'insert + update');
+  await Net.beat(ctx);
+
+  win('sC', 'mC');
+  say('<b>A tie: 2 writes each.</b> The difference is <b>where</b> the reaction lives: SQL adds a separate small row, MongoDB rewrites the message to put it inside. That choice decides the steps that follow.', 'win');
+}
+
+// ================= Step 2: read the message back =================
+const RX3 = [{ u: 'Aman', e: 'like' }, { u: 'Zoya', e: 'love' }, { u: 'Om', e: 'laugh' }];
+function setup2() {
+  lanes();
+  app('sA', 140, LS);
+  table('msgs', 520, TS + 77, 'messages table', 'id · sender · text', ['101 · Rahul · “Movie tonight?”']);
+  table('rx', 520, TS + 220, 'reactions table', 'message · user · emoji', ['101 · Aman · 👍', '101 · Zoya · ❤️', '101 · Om · 😂']);
+  counter('sC', 870, LS, 'Rows back', 0);
+  Net.link('sA', 'msgs');
+  Net.link('sA', 'rx');
+  app('mA', 140, LM);
+  collection('col', 520, LM, [{ id: 101, from: 'Rahul', text: 'Movie tonight?', rx: RX3 }]);
+  counter('mC', 870, LM, 'Documents back', 0);
+  Net.link('mA', 'col');
+  setQ('sql', 'SELECT m.text, r.user, r.emoji\nFROM messages m\nLEFT JOIN reactions r ON r.message_id = m.id\nWHERE m.id = 101;');
+  setQ('mg', 'db.messages.findOne({ "_id": 101 })');
+  setF(cap('what comes back: 3 rows, the text repeated in every row') + tbl('result', ['text', 'user', 'emoji'], [['Movie tonight?', 'Aman', 'like'], ['Movie tonight?', 'Zoya', 'love'], ['Movie tonight?', 'Om', 'laugh']])
+      + cap('the tables (unchanged, this is a read)') + tbl('messages', MCOLS, [[101, 'Rahul', 'Movie tonight?']]) + tbl('reactions', RCOLS, [[101, 'Aman', 'like'], [101, 'Zoya', 'love'], [101, 'Om', 'laugh']]),
+    cap('what comes back: 1 document, already in the shape the screen needs') + json({ _id: 101, from: 'Rahul', text: 'Movie tonight?', reactions: [{ user: 'Aman', emoji: 'like' }, { user: 'Zoya', emoji: 'love' }, { user: 'Om', emoji: 'laugh' }] }),
+    'SQL result + tables', 'MongoDB result');
+}
+async function run2(ctx) {
+  say('Someone opens the chat. The message now has <b>3 reactions</b>. Both apps must show it.');
+  await Net.beat(ctx);
+
+  say('<b>SQL</b> joins the two tables. The answer comes back as <b>one row per reaction</b>, with the message text repeated on each.');
+  await send('sA', 'rx', 'JOIN messages + reactions');
+  markRows('msgs', () => true, 'read');
+  for (let i = 0; i < 3; i++) {
+    markRows('rx', (r, k) => k === i, 'read');
+    await send('rx', 'sA', `“Movie tonight?” + ${EMO[RX3[i].e]}`, 'amber', 900);
+    setC('sC', 'Rows back', i + 1);
+    show('sA', `<span class="wait-t">${i + 1} row${i ? 's' : ''} received…</span>`);
+  }
+  say('The app now has <b>3 rows</b> and has to fold them back into one message.');
+  await Net.beat(ctx, 2000);
+  show('sA', bubble('Movie tonight?', RX3));
+  await Net.beat(ctx, 1600);
+
+  say('<b>MongoDB</b> sends back the document <b>exactly as stored</b>: one message, reactions inside.');
+  await send('mA', 'col', 'findOne 101');
+  D.col.docs[0].s = 'read';
+  paintD('col');
+  await send('col', 'mA', 'the whole message', 'teal');
+  setC('mC', 'Documents back', 1);
+  show('mA', bubble('Movie tonight?', RX3));
+  await Net.beat(ctx);
+
+  win('mC');
+  say('<b>MongoDB.</b> The data arrives <b>in the shape the screen needs</b>. SQL flattens it into rows that the app must rebuild.', 'win');
+}
+
+// ================= Step 3: send a poll (its options are born with it) =================
+function setup3() {
+  lanes();
+  app('sA', 140, LS);
+  table('msgs', 520, TS + 77, 'messages table', 'id · sender · text', []);
+  table('opts', 520, TS + 220, 'poll_options table', 'message · option', []);
+  counter('sC', 870, LS, 'Writes', 0);
+  Net.link('sA', 'msgs');
+  Net.link('sA', 'opts');
+  app('mA', 140, LM);
+  collection('col', 520, LM, []);
+  counter('mC', 870, LM, 'Writes', 0);
+  Net.link('mA', 'col');
+  setQ('sql', "START TRANSACTION;\n\nINSERT INTO messages (id, sender, text)\nVALUES (102, 'Om', 'Which show?');\n\nINSERT INTO poll_options (message_id, option_text)\nVALUES (102, '7 PM'), (102, '10 PM');\n\nCOMMIT;\n-- if anything fails: ROLLBACK;");
+  setF(tbl('messages', MCOLS, [[102, 'Om', 'Which show?']]) + tbl('poll_options', ['message_id', 'option_text'], [[102, '7 PM'], [102, '10 PM']]),
+    cap('collection: messages') + json({ _id: 102, from: 'Om', text: 'Which show?', poll: ['7 PM', '10 PM'] }));
+  setQ('mg', 'db.messages.insertOne({\n  "_id": 102,\n  "from": "Om",\n  "text": "Which show?",\n  "poll": ["7 PM", "10 PM"]\n})');
+}
+async function run3(ctx) {
+  const pollBubble = '<div class="bubble">📊 Which show?<div class="rxs"><span class="re">7 PM</span><span class="re">10 PM</span></div></div>';
+  show('sA', pollBubble);
+  show('mA', pollBubble);
+  say('Om sends a <b>poll</b>: “Which show?” with options <b>7 PM</b> and <b>10 PM</b>. Unlike a reaction, the options are <b>created together with the message</b>: a poll without its options makes no sense.');
+  await Net.beat(ctx);
+
+  say('<b>SQL</b> keeps options in their own table, so it needs <b>two writes</b>, inside a transaction so a half-saved poll can never appear.');
+  Net.set('sA', { badge: 'transaction' });
+  await send('sA', 'msgs', 'INSERT message');
+  addRow('msgs', '102 · Om · 📊 “Which show?”');
+  setC('sC', 'Writes', 1);
+  await send('sA', 'opts', 'INSERT options');
+  addRow('opts', '102 · 7 PM');
+  addRow('opts', '102 · 10 PM');
+  setC('sC', 'Writes', 2, '2 tables + transaction');
+  await Net.beat(ctx, 2200);
+
+  say('<b>MongoDB</b> stores the poll with its options as <b>one document</b>: one write, and it is saved completely or not at all.');
+  await send('mA', 'col', 'insertOne poll + options');
+  D.col.docs = [{ id: 102, from: 'Om', text: 'Which show?', poll: ['7 PM', '10 PM'], s: 'new' }];
+  paintD('col');
+  setC('mC', 'Writes', 1, 'no transaction needed');
+  await Net.beat(ctx);
+
+  win('mC');
+  say('<b>MongoDB: 1 write instead of 2</b>, when the parts are <b>born together</b>. Every extra part (an image with a caption, a poll with options) is another SQL table to write to.', 'win');
+}
+
+// ================= Step 3b: a viral message =================
+const FANS = ['Riya', 'Dev', 'Isha', 'Kabir', 'Tara', 'Neel'];
+const FAN_POS = [[70, 80], [175, 80], [70, 158], [175, 158], [70, 236], [175, 236]];
+function setup3b() {
+  lanes();
+  FANS.forEach((f, i) => Net.node('sf' + i, { x: FAN_POS[i][0], y: TS + FAN_POS[i][1], label: f, kind: 'client small', w: 84 }));
+  table('rx', 560, LS, 'reactions table', 'message · user · emoji', ['101 · Aman · 👍'], { compact: true, w: 330 });
+  counter('sC', 880, LS, 'Rounds', 0);
+  FANS.forEach((f, i) => Net.node('mf' + i, { x: FAN_POS[i][0], y: TM + FAN_POS[i][1], label: f, kind: 'client small', w: 84 }));
+  Net.node('queue', { x: 395, y: LM, label: 'Waiting in line', kind: 'proxy', w: 170, body: '<div class="none">nobody yet</div>' });
+  collection('col', 655, LM, [{ id: 101, from: 'Rahul', text: 'Movie tonight?', rx: [{ u: 'Aman', e: 'like' }] }], { w: 270 });
+  counter('mC', 880, LM, 'Rounds', 0);
+  Net.link('queue', 'col');
+  setQ('sql', "-- 6 of these arrive at the same moment\nINSERT INTO reactions (message_id, user, emoji)\nVALUES (101, 'Riya', 'like');");
+  setF(tbl('reactions', RCOLS, [[101, 'Aman', 'like']].concat(FANS.map(f => [101, f, 'like']))) + cap('6 new rows, written side by side'),
+    cap('collection: messages  (one document, rewritten 6 times)') + json({ _id: 101, from: 'Rahul', text: 'Movie tonight?', reactions: [{ user: 'Aman', emoji: 'like' }].concat(FANS.map(f => ({ user: f, emoji: 'like' }))) }));
+  setQ('mg', '// 6 of these arrive at the same moment\ndb.messages.updateOne(\n  { "_id": 101 },\n  { "$push": { "reactions": { "user": "Riya", "emoji": "like" } } }\n)');
+}
+async function run3b(ctx) {
+  say('The message goes <b>viral</b>: 6 people react <b>at the same moment</b>. (Imagine 6,000.)');
+  await Net.beat(ctx);
+
+  say('<b>SQL:</b> each reaction is <b>its own row</b>, so all 6 are written <b>side by side</b>. Nobody waits.');
+  await Promise.all(FANS.map((f, i) => send('sf' + i, 'rx', '👍', '', 1100)));
+  Net.check(ctx);
+  FANS.forEach(f => addRow('rx', '101 · ' + f + ' · 👍'));
+  setC('sC', 'Rounds', 1, 'all at once');
+  await Net.beat(ctx);
+
+  say('<b>MongoDB:</b> all 6 want to change <b>the same document</b>. Only one change at a time, so they <b>queue up</b>...');
+  await Promise.all(FANS.map((f, i) => send('mf' + i, 'queue', '👍', '', 1100)));
+  Net.check(ctx);
+  const waiting = FANS.map(f => ({ u: f, e: 'like', s: 'wait' }));
+  Net.set('queue', { body: chips(waiting) });
+  await Net.beat(ctx, 2000);
+
+  say('...and each one, in turn, <b>rewrites the whole document</b>, which gets bigger every time.');
+  const doc = D.col.docs[0];
+  for (let k = 0; k < FANS.length; k++) {
+    waiting[k].s = 'new';
+    Net.set('queue', { body: chips(waiting.slice(k)) });
+    await send('queue', 'col', FANS[k] + ' 👍', 'amber', 700);
+    doc.rx = doc.rx.map(r => ({ u: r.u, e: r.e }));
+    doc.rx.push({ u: FANS[k], e: 'like', s: 'new' });
+    doc.s = 'rewrite';
+    doc.tag = `rewrite ${k + 1} of 6`;
+    paintD('col');
+    setC('mC', 'Rounds', k + 1, 'one at a time');
+  }
+  Net.set('queue', { body: '<div class="none">empty</div>' });
+  await Net.beat(ctx);
+
+  win('sC');
+  say('<b>SQL wins for viral messages.</b> Separate rows are written side by side; one shared document becomes a queue, and keeps growing (a document can\'t exceed 16 MB). Real apps then keep reactions separate even in MongoDB, with just a count inside the message.', 'win');
+}
+
+// ================= Step 4: delete the message =================
+function setup4() {
+  lanes();
+  app('sA', 140, LS);
+  table('msgs', 520, TS + 77, 'messages table', 'id · sender · text', ['101 · Rahul · “Movie tonight?”']);
+  table('rx', 520, TS + 220, 'reactions table', 'message · user · emoji', ['101 · Aman · 👍', '101 · Zoya · ❤️']);
+  counter('sC', 870, LS, 'Deleted', 0);
+  Net.link('sA', 'msgs');
+  Net.link('sA', 'rx');
+  app('mA', 140, LM);
+  collection('col', 520, LM, [{ id: 101, from: 'Rahul', text: 'Movie tonight?', rx: [{ u: 'Aman', e: 'like' }, { u: 'Zoya', e: 'love' }] }]);
+  counter('mC', 870, LM, 'Deleted', 0);
+  Net.link('mA', 'col');
+  setQ('sql', 'START TRANSACTION;\n\nDELETE FROM reactions WHERE message_id = 101;\nDELETE FROM messages  WHERE id = 101;\n\nCOMMIT;\n-- if anything fails: ROLLBACK;');
+  setQ('mg', 'db.messages.deleteOne({ "_id": 101 })');
+  setF(tbl('messages', MCOLS, []) + tbl('reactions', RCOLS, []), cap('collection: messages') + '<div class="none">no documents</div>');
+}
+async function run4(ctx) {
+  show('sA', '<span class="wait-t">deleting “Movie tonight?”</span>');
+  show('mA', '<span class="wait-t">deleting “Movie tonight?”</span>');
+  say('Rahul deletes the message. It has 2 reactions.');
+  await Net.beat(ctx);
+
+  say('<b>SQL</b> must find and delete the message\'s rows in <b>every table</b>: first its reactions...');
+  await send('sA', 'rx', 'DELETE reactions of 101');
+  await dropRows(ctx, 'rx', () => true);
+  setC('sC', 'Deleted', 2, 'rows');
+  say('...then the message itself.');
+  await send('sA', 'msgs', 'DELETE message 101');
+  await dropRows(ctx, 'msgs', () => true);
+  setC('sC', 'Deleted', 3, 'rows in 2 tables');
+  await Net.beat(ctx, 2200);
+
+  say('<b>MongoDB</b> deletes <b>one document</b>, and the reactions go with it, because they were inside it.');
+  await send('mA', 'col', 'deleteOne 101');
+  D.col.docs[0].s = 'bad';
+  paintD('col');
+  await Net.wait(ctx, 700);
+  D.col.docs[0].s = 'gone';
+  paintD('col');
+  await Net.wait(ctx, 450);
+  D.col.docs = [];
+  paintD('col');
+  setC('mC', 'Deleted', 1, 'document');
+  await Net.beat(ctx);
+
+  win('mC');
+  say('<b>MongoDB.</b> Deleting mirrors step 1: everything SQL spread over tables must be found and deleted in each one. With 1,000 reactions: 1,001 rows vs still 1 document.', 'win');
+}
+
+// ================= Step 4b: sharded by chat_id =================
+function setup4b() {
+  lanes('SQL: sharded across servers', 'MongoDB: sharded across servers');
+  app('sA', 110, LS);
+  Net.group({ x: 230, y: TS + 34, w: 540, h: 270, label: 'Server 3 · holds chat 7' });
+  Net.group({ x: 790, y: TS + 34, w: 178, h: 270, label: 'Server 5' });
+  table('msgs', 370, LS + 10, 'messages', 'id · chat · text', ['101 · chat 7 · “Movie tonight?”'], { w: 250 });
+  table('rx5', 879, LS + 10, 'reactions', 'message · user · emoji', [], { w: 160 });
+  Net.link('sA', 'msgs');
+  app('mA', 110, LM);
+  Net.group({ x: 230, y: TM + 34, w: 540, h: 270, label: 'Server 3 · holds chat 7' });
+  Net.group({ x: 790, y: TM + 34, w: 178, h: 270, label: 'Server 5' });
+  collection('col', 500, LM + 10, [{ id: 101, from: 'Rahul', text: 'Movie tonight?', rx: [] }], { w: 300 });
+  Net.node('m5', { x: 879, y: LM + 10, label: 'messages', sub: 'collection', kind: 'lb', w: 160, body: '<div class="none">nothing for chat 7</div>' });
+  Net.link('mA', 'col');
+  setQ('sql', "-- BEFORE: messages split by chat_id (chat 7 → Server 3),\n-- reactions has no chat_id, so it is split by message_id (→ Server 5)\nINSERT INTO reactions (message_id, user, emoji)\nVALUES (101, 'Aman', 'like'), (101, 'Zoya', 'love');\n\n-- THE FIX: copy chat_id into reactions, split it by chat_id too\nALTER TABLE reactions ADD COLUMN chat_id BIGINT;\n\nINSERT INTO reactions (message_id, chat_id, user, emoji)\nVALUES (101, 7, 'Aman', 'like'), (101, 7, 'Zoya', 'love');\n-- → Server 3, next to its message");
+  setQ('mg', '// documents are split by chat_id:  chat 7 → Server 3\ndb.messages.updateOne(\n  { "_id": 101, "chat_id": 7 },\n  { "$push": { "reactions": { "$each": [\n    { "user": "Aman", "emoji": "like" },\n    { "user": "Zoya", "emoji": "love" }\n  ] } } }\n)\n// the reactions are inside the document,\n// so they always live wherever the message lives');
+  setF(cap('Server 3 (holds chat 7)') + tbl('messages', ['id', 'chat_id', 'text'], [[101, 7, 'Movie tonight?']]) + tbl('reactions', ['message_id', 'chat_id', 'user', 'emoji'], [[101, 7, 'Aman', 'like'], [101, 7, 'Zoya', 'love']])
+      + cap('Server 5') + tbl('reactions', ['message_id', 'chat_id', 'user', 'emoji'], []),
+    cap('Server 3 (holds chat 7), collection: messages') + json({ _id: 101, chat_id: 7, from: 'Rahul', text: 'Movie tonight?', reactions: [{ user: 'Aman', emoji: 'like' }, { user: 'Zoya', emoji: 'love' }] })
+      + cap('Server 5: nothing for chat 7'));
+}
+async function run4b(ctx) {
+  say('The data has grown, so it is <b>split across servers by chat_id</b>. Chat 7 lives on <b>Server 3</b>. Aman and Zoya react to message 101. Where do the reactions go?');
+  await Net.beat(ctx);
+
+  say('<b>SQL:</b> the reactions table has <b>no chat_id</b> (a reaction points to its message, not its chat). So it is split by message_id, and these reactions land on <b>Server 5</b>, away from their message.', 'err');
+  await send('sA', 'rx5', 'reactions of message 101');
+  addRow('rx5', '101 · Aman · 👍');
+  addRow('rx5', '101 · Zoya · ❤️');
+  markRows('rx5', () => true, 'bad');
+  Net.set('rx5', { badge: 'far from its message', badgeCls: 'bad' });
+  await Net.beat(ctx);
+  say('Now reading or deleting message 101 needs <b>two servers</b>, and a delete needs one transaction <b>across</b> servers: slow and hard.', 'err');
+  await Net.beat(ctx);
+
+  say('<b>The SQL fix:</b> copy <code>chat_id</code> into the reactions table, and split it by chat_id too. The reactions move next to their message.');
+  table('rx3', 635, LS + 10, 'reactions (+ chat_id)', 'message · chat · user · emoji', [], { w: 250 });
+  await send('rx5', 'rx3', 'move to Server 3', 'teal', 1300);
+  T.rx5.rows = [];
+  paintT('rx5');
+  Net.set('rx5', { badge: '' });
+  addRow('rx3', '101 · chat 7 · Aman · 👍');
+  addRow('rx3', '101 · chat 7 · Zoya · ❤️');
+  await Net.beat(ctx);
+  say('Keeping related data on the same server is called <b>co-location</b>. SQL must do it by hand for <b>every</b> child table: reactions, attachments, read receipts...');
+  await Net.beat(ctx);
+
+  say('<b>MongoDB:</b> the reactions are <b>inside</b> the message, and the message is placed by chat_id. They land on Server 3 <b>automatically</b>.');
+  await send('mA', 'col', 'reactions of message 101');
+  D.col.docs[0].rx = [{ u: 'Aman', e: 'like', s: 'new' }, { u: 'Zoya', e: 'love', s: 'new' }];
+  D.col.docs[0].s = 'new';
+  D.col.docs[0].tag = 'together';
+  paintD('col');
+  await Net.beat(ctx);
+
+  say('<b>MongoDB.</b> Co-location is free when related data lives inside the same document. In SQL it costs a copied column and careful splitting for every child table.', 'win');
+}
+
+// ================= Step 5: a new feature (voice notes) =================
+function setup5() {
+  lanes();
+  app('sA', 140, LS);
+  table('msgs', 520, TS + 92, 'messages table', 'id · type · text', ['101 · text · “Movie tonight?”', '102 · text · “At 7?”']);
+  counter('sC', 870, LS, 'Queries to open a chat', 1);
+  Net.link('sA', 'msgs');
+  app('mA', 140, LM);
+  collection('col', 520, LM, [
+    { id: 101, from: 'Rahul', text: 'Movie tonight?' },
+    { id: 102, from: 'Aman', text: 'At 7?' }
+  ], { w: 440, grid: true });
+  counter('mC', 870, LM, 'Queries to open a chat', 1);
+  Net.link('mA', 'col');
+  setQ('sql', "-- 1. before the feature ships, on EVERY shard:\nCREATE TABLE voice_notes (\n  message_id BIGINT, chat_id BIGINT, url VARCHAR(500), duration_sec INT\n);\n\n-- 2. sending a voice note:\nSTART TRANSACTION;\n\nINSERT INTO messages (id, type, text)\nVALUES (103, 'voice', NULL);\n\nINSERT INTO voice_notes (message_id, chat_id, url, duration_sec)\nVALUES (103, 7, 'audio/103.m4a', 12);\n\nCOMMIT;\n-- if anything fails: ROLLBACK;");
+  setF(tbl('messages', ['id', 'type', 'text'], [[101, 'text', 'Movie tonight?'], [102, 'text', 'At 7?'], [103, 'voice', 'NULL']]) + tbl('voice_notes (new)', ['message_id', 'chat_id', 'url', 'duration_sec'], [[103, 7, 'audio/103.m4a', 12]]),
+    cap('collection: messages  (old documents untouched)') + json([
+      { _id: 101, from: 'Rahul', text: 'Movie tonight?' },
+      { _id: 102, from: 'Aman', text: 'At 7?' },
+      { _id: 103, from: 'Zoya', type: 'voice', audio: { url: 'audio/103.m4a', duration_sec: 12 } }]));
+  setQ('mg', '// 1. nothing to change before the feature ships\n\n// 2. sending a voice note:\ndb.messages.insertOne({\n  "_id": 103,\n  "from": "Zoya",\n  "type": "voice",\n  "audio": { "url": "audio/103.m4a", "duration_sec": 12 }\n})');
+}
+async function run5(ctx) {
+  say('A new feature ships: <b>voice notes</b> 🎤. They need fields no other message has: a <b>url</b> and a <b>duration</b>. There are already 2 billion messages.');
+  await Net.beat(ctx);
+
+  say('<b>SQL</b> must change its structure first: a <b>new table</b>, created on <b>every server</b> (or new columns that are empty for all 2 billion old rows).');
+  table('voice', 520, TS + 238, 'voice_notes table (new)', 'message · url · seconds', [], { w: 300 });
+  Net.set('voice', { badge: 'created on all 8 shards' });
+  Net.link('sA', 'voice');
+  await Net.beat(ctx);
+
+  say('Sending a voice note is now <b>2 writes</b>, and opening a chat needs <b>one more query</b> (for voice_notes).');
+  show('sA', bubble('🎤 voice note · 12 s'));
+  await send('sA', 'msgs', 'INSERT message');
+  addRow('msgs', '103 · voice · (empty)');
+  await send('sA', 'voice', 'INSERT voice note');
+  addRow('voice', '103 · audio/103.m4a · 12');
+  setC('sC', 'Queries to open a chat', 2);
+  await Net.beat(ctx);
+
+  say('<b>MongoDB</b> just saves a document <b>with the new shape</b>. Old messages are untouched, and opening a chat is still <b>one query</b>.');
+  show('mA', bubble('🎤 voice note · 12 s'));
+  await send('mA', 'col', 'insertOne voice note');
+  D.col.docs.forEach(d => { d.tag = 'untouched'; });
+  D.col.docs.push({ id: 103, from: 'Zoya', voice: 12, s: 'new', tag: 'new shape' });
+  paintD('col');
+  await Net.beat(ctx);
+
+  win('mC');
+  say('<b>MongoDB.</b> A new feature in SQL means a schema change on every server, plus another table and query. In MongoDB, each message simply carries the fields its type needs. (Your app must handle older documents that don\'t have them.)', 'win');
+}
+
+// ================= Step 6: a different angle =================
+function setup6() {
+  lanes();
+  app('sA', 140, LS);
+  table('rx', 520, LS, 'reactions table', 'message · user · emoji',
+    ['101 · Aman · 👍', '101 · Zoya · ❤️', '101 · Om · 😂', '102 · Zoya · 👍', '102 · Riya · 😮', '103 · Zoya · ❤️', '103 · Dev · 👍'], { compact: true, w: 340 });
+  counter('sC', 870, LS, 'Data read', 0);
+  Net.link('sA', 'rx');
+  app('mA', 140, LM);
+  collection('col', 520, LM, [
+    { id: 101, from: 'Rahul', text: 'Movie tonight?', rx: [{ u: 'Aman', e: 'like' }, { u: 'Zoya', e: 'love' }, { u: 'Om', e: 'laugh' }] },
+    { id: 102, from: 'Om', text: 'Running late', rx: [{ u: 'Zoya', e: 'like' }, { u: 'Riya', e: 'wow' }] },
+    { id: 103, from: 'Dev', text: 'See you!', rx: [{ u: 'Zoya', e: 'love' }, { u: 'Dev', e: 'like' }] }
+  ], { w: 440, grid: true });
+  counter('mC', 870, LM, 'Data read', 0);
+  Net.link('mA', 'col');
+  setQ('sql', "SELECT emoji, COUNT(*) AS times\nFROM reactions\nWHERE user = 'Zoya'\nGROUP BY emoji;");
+  setF(cap('what comes back') + tbl('result', ['emoji', 'times'], [['love', 2], ['like', 1]])
+      + cap('the table (unchanged, this is a read)') + tbl('reactions', RCOLS, [[101, 'Aman', 'like'], [101, 'Zoya', 'love'], [101, 'Om', 'laugh'], [102, 'Zoya', 'like'], [102, 'Riya', 'wow'], [103, 'Zoya', 'love'], [103, 'Dev', 'like']]),
+    cap('what comes back') + json([{ _id: 'love', times: 2 }, { _id: 'like', times: 1 }]) + cap('the documents it had to open (unchanged)') + json([
+      { _id: 101, from: 'Rahul', text: 'Movie tonight?', reactions: [{ user: 'Aman', emoji: 'like' }, { user: 'Zoya', emoji: 'love' }, { user: 'Om', emoji: 'laugh' }] },
+      { _id: 102, from: 'Om', text: 'Running late', reactions: [{ user: 'Zoya', emoji: 'like' }, { user: 'Riya', emoji: 'wow' }] },
+      { _id: 103, from: 'Dev', text: 'See you!', reactions: [{ user: 'Zoya', emoji: 'love' }, { user: 'Dev', emoji: 'like' }] }]),
+    'SQL result + table', 'MongoDB result + documents');
+  setQ('mg', 'db.messages.aggregate([\n  { "$match":  { "reactions.user": "Zoya" } },\n  { "$unwind": "$reactions" },\n  { "$match":  { "reactions.user": "Zoya" } },\n  { "$group":  { "_id": "$reactions.emoji", "times": { "$sum": 1 } } }\n])');
+}
+async function run6(ctx) {
+  say('A different question: <b>which emoji does Zoya use most?</b> It is not about one message; it is about one <b>person</b>, across many chats.');
+  await Net.beat(ctx);
+
+  say('<b>SQL:</b> reactions are their own table. An index on <b>user</b> jumps straight to <b>Zoya\'s rows only</b>. Nothing else is read.');
+  await send('sA', 'rx', "Zoya's reactions");
+  markRows('rx', r => r.t.includes('Zoya'), 'new');
+  markRows('rx', r => !r.t.includes('Zoya'), 'dim');
+  await send('rx', 'sA', '3 small rows', 'teal');
+  setC('sC', 'Data read', 3, 'small rows');
+  show('sA', '<b>❤️ 2 · 👍 1</b>');
+  await Net.beat(ctx);
+
+  say('<b>MongoDB:</b> Zoya\'s reactions are <b>buried inside</b> 3 different messages. It has to read those <b>whole</b> messages to reach them...');
+  await send('mA', 'col', 'messages Zoya reacted to');
+  D.col.docs.forEach(d => { d.s = 'read'; });
+  paintD('col');
+  await send('col', 'mA', '3 whole messages', 'amber');
+  setC('mC', 'Data read', 3, 'whole messages, 7 reactions');
+  await Net.beat(ctx, 2200);
+  say('...then throw away everyone else\'s reactions.');
+  D.col.docs.forEach(d => d.rx.forEach(r => { r.s = r.u === 'Zoya' ? 'keep' : 'drop'; }));
+  paintD('col');
+  show('mA', '<b>❤️ 2 · 👍 1</b>');
+  await Net.beat(ctx);
+
+  win('sC');
+  say('<b>SQL.</b> Asked from a <b>different angle</b> (by person, not by message), "keep it together" makes MongoDB read far more than it needs. If the data were split across servers by chat, it would also have to ask every server.', 'win');
+}
+
+// ================= Step 7: a user changes her name =================
+function setup7() {
+  lanes();
+  app('sA', 140, LS);
+  table('users', 520, TS + 70, 'users table', 'id · name', ['44 · Zoya']);
+  table('msgs', 520, TS + 222, 'messages table', 'id · sender · text', ['101 · user 44 · “Movie tonight?”', '205 · user 44 · “Running late”', '309 · user 44 · “See you!”']);
+  counter('sC', 870, LS, 'Changed', 0);
+  Net.link('sA', 'users');
+  app('mA', 140, LM);
+  collection('col', 520, LM, [
+    { id: 101, from: 'Zoya', text: 'Movie tonight?' },
+    { id: 205, from: 'Zoya', text: 'Running late' },
+    { id: 309, from: 'Zoya', text: 'See you!' }
+  ], { w: 440, grid: true });
+  counter('mC', 870, LM, 'Changed', 0);
+  Net.link('mA', 'col');
+  setQ('sql', "UPDATE users SET name = 'Zoya Khan' WHERE id = 44;");
+  setQ('mg', 'db.messages.updateMany(\n  { "from": "Zoya" },\n  { "$set": { "from": "Zoya Khan" } }\n)');
+  setF(tbl('users', ['id', 'name'], [[44, 'Zoya Khan']]) + tbl('messages (unchanged)', ['id', 'sender_id', 'text'], [[101, 44, 'Movie tonight?'], [205, 44, 'Running late'], [309, 44, 'See you!']]),
+    cap('collection: messages  (all 3 rewritten)') + json([
+      { _id: 101, from: 'Zoya Khan', text: 'Movie tonight?' },
+      { _id: 205, from: 'Zoya Khan', text: 'Running late' },
+      { _id: 309, from: 'Zoya Khan', text: 'See you!' }]));
+}
+async function run7(ctx) {
+  say('Zoya changes her name to <b>Zoya Khan</b>. In MongoDB, her name was <b>copied into every message</b> she sent (so the chat screen needs no extra lookup).');
+  await Net.beat(ctx);
+
+  say('<b>SQL</b> changes <b>one row</b>. Every message points to user 44, so they all show the new name at once.');
+  await send('sA', 'users', 'UPDATE name');
+  T.users.rows[0] = { t: '44 · Zoya Khan', s: 'new' };
+  paintT('users');
+  markRows('msgs', () => true, 'link');
+  setC('sC', 'Changed', 1, 'row');
+  await Net.beat(ctx);
+
+  say('<b>MongoDB</b> must change <b>every message</b> that carries the old name, one by one.');
+  for (let i = 0; i < D.col.docs.length; i++) {
+    await send('mA', 'col', 'update message ' + D.col.docs[i].id, '', 800);
+    D.col.docs[i].from = 'Zoya Khan';
+    D.col.docs[i].s = 'new';
+    paintD('col');
+    setC('mC', 'Changed', i + 1, i ? 'documents' : 'document');
+  }
+  say('Here it is 3, but really it is <b>every message she ever sent</b>: thousands, spread across servers.', 'err');
+  await Net.beat(ctx);
+
+  win('sC');
+  say('<b>SQL.</b> Her name is <b>shared</b> by all her messages and it can change, so store it once. The MongoDB fix: keep only her id in each message and look the name up, the way SQL does.', 'win');
+}
+
+// ================= Step 8: scoreboard =================
+const SCORE = [
+  ['1', 'Send a message, a reaction comes later', 'insert + insert', 'insert + update (rewrite)', 'tie'],
+  ['2', 'Read it back', '1 row per reaction, rebuilt', '1 document, ready', 'mg'],
+  ['3', 'Send a poll with its options', '2 tables + transaction', '1 document', 'mg'],
+  ['3b', 'Viral message', 'all at once', 'one at a time', 'sql'],
+  ['4', 'Delete the message', 'rows in every table', '1 document', 'mg'],
+  ['4b', 'Split across servers', 'copy chat_id into every table', 'together automatically', 'mg'],
+  ['5', 'New feature: voice notes', 'new table on every server', 'just new fields', 'mg'],
+  ['6', "Zoya's favourite emoji", 'only her rows', 'whole messages', 'sql'],
+  ['7', 'Zoya changes her name', '1 row', 'every message', 'sql']
+];
+const WIN = { mg: '<span class="w mg">MongoDB</span>', sql: '<span class="w sql">SQL</span>', tie: '<span class="w tie">tie</span>' };
+function boardHTML(shown, rule) {
+  return '<table class="score"><tr><th>Step</th><th>What we did</th><th>SQL</th><th>MongoDB</th><th>Better</th></tr>'
+    + SCORE.map((r, i) => `<tr class="${i < shown ? '' : 'hide'}"><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${WIN[r[4]]}</td></tr>`).join('')
+    + '</table>' + (rule ? '<div class="rule"><b>MongoDB wins</b> when you work with <b>one thing as a whole</b>: create it, read it, delete it, give it new fields.<br><b>SQL wins</b> when you ask <b>across many things</b>, when <b>many people write to one thing at once</b>, or when you change something <b>shared</b>.</div>' : '');
+}
+function setup8() {
+  Net.node('board', { x: 500, y: 338, label: 'Scoreboard', kind: 'server', w: 900, body: boardHTML(0, false) });
+  setQ('sql', '');
+  setQ('mg', '');
+  setF('', '');
+}
+async function run8(ctx) {
+  say('All the steps, one at a time.');
+  for (let i = 1; i <= SCORE.length; i++) {
+    await Net.wait(ctx, 800);
+    Net.set('board', { body: boardHTML(i, false) });
+  }
+  await Net.beat(ctx, 2000);
+  Net.set('board', { body: boardHTML(SCORE.length, true) });
+  say('<b>The rule:</b> pick the database by <b>how you read and write the data</b>. Real chat apps use both: messages in a NoSQL store, users and payments in SQL.', 'win');
+}
+
+// ---------- the question before each step, and the answer after it ----------
+const QA = [
+  { q: 'The reaction arrives a minute after the message. Does keeping reactions inside the message save any work here?',
+    a: ['SQL: 2 INSERTs. MongoDB: insertOne + updateOne. Both do <b>2 writes</b>.',
+        'Each write touches one place, so neither side needs a transaction.',
+        'Simple writes that happen at different times cost the same in both.',
+        'So writing is not the reason to pick one. The next steps decide it.'],
+    win: 'Tie' },
+  { q: 'The screen needs the message and its reactions together. Which database hands them over ready to show?',
+    a: ['SQL joins 2 tables and returns <b>3 rows</b>, with the message text repeated in each one.',
+        'The app has to glue those rows back into one message.',
+        'MongoDB returns <b>1 document</b> that already looks like the screen.',
+        'A chat is opened far more often than it is written to, so this saving repeats all day.'],
+    win: 'MongoDB' },
+  { q: 'Poll options are created with the poll and never live without it. Is it worth spreading one poll over 2 tables?',
+    a: ['SQL: 2 tables, 2 INSERTs, and a <b>transaction</b> so a poll never exists without its options.',
+        'MongoDB: <b>1 insert</b>. One document is saved all-or-nothing by itself.',
+        'Data that is born together and read together belongs together.'],
+    win: 'MongoDB' },
+  { q: '6 people react to the same message in the same second. What happens when all of them must change one document?',
+    a: ['SQL: each reaction is a <b>new row</b>, so all 6 are written side by side.',
+        'MongoDB: all 6 change the <b>same document</b>, so they wait in line, one at a time.',
+        'The document keeps growing with every reaction (limit: 16 MB).',
+        'Embedding breaks when one item gets many writes at once, or grows without limit.',
+        'Real apps keep such data in its own collection and store only a count in the message.'],
+    win: 'SQL' },
+  { q: 'Rahul deletes his message. How many places must be cleaned up, and what if it stops half-way?',
+    a: ['SQL: delete from <b>2 tables</b>, inside a transaction, or reactions are left behind with no message.',
+        'MongoDB: <b>1 deleteOne</b>. The reactions are inside, so they go with it.',
+        'What belongs to one thing should disappear with it.'],
+    win: 'MongoDB' },
+  { q: 'The data is split across servers by chat. Will a message\'s reactions end up on the same server as the message?',
+    a: ['Messages are placed by chat_id. The SQL reactions table has no chat_id, so its rows land on <b>another server</b>.',
+        'Reading or deleting one message then needs 2 servers.',
+        'The SQL fix: copy chat_id into <b>every child table</b> (co-location). Done by hand, table by table.',
+        'MongoDB: the reactions live inside the message, so they always sit on the same server for free.'],
+    win: 'MongoDB' },
+  { q: 'A new kind of message needs new fields. What must change in the database before the feature can ship?',
+    a: ['SQL: a new table (or new columns) created on <b>every server</b> before release.',
+        'Every voice note is now 2 writes in a transaction, and opening a chat needs 1 more query.',
+        'MongoDB: just save a document with the new fields. Old documents stay as they are.',
+        'The app must cope with old documents that don\'t have the new fields.'],
+    win: 'MongoDB' },
+  { q: 'Now the question is about a person, not a message. In which design do Zoya\'s reactions sit in one place?',
+    a: ['SQL: the reactions table holds Zoya\'s rows; with an index on user, it reads <b>only her 3 rows</b>.',
+        'MongoDB: her reactions are scattered inside many messages, so it opens <b>whole messages</b> and picks hers out.',
+        'Embedding is built for one way of looking at data (by message). Other angles cost more.'],
+    win: 'SQL' },
+  { q: 'Zoya changes her name. If her name was copied into every message, how many places need fixing?',
+    a: ['SQL: the name is stored <b>once</b> in users. 1 row changes; messages only point to user 44.',
+        'MongoDB: the name was copied into every message, so <b>every one</b> must be rewritten (millions for an active user).',
+        'Copying shared data that changes is expensive.',
+        'The fix in MongoDB: store only the user id in the message, just like SQL does.'],
+    win: 'SQL' },
+  { q: 'Looking at every step: when does MongoDB win, and when does SQL win?',
+    a: ['MongoDB wins when you work with <b>one thing as a whole</b>: read it, create it, delete it, give it new fields, split it across servers.',
+        'SQL wins when you ask <b>across many things</b> (Zoya\'s stats), change <b>shared data</b> (her name), or many people write to <b>one item</b> at once (viral).',
+        'Rule: store together what belongs to one thing and is used together. Keep shared data that changes in one place, and point to it.'],
+    win: '' }
+];
+let ansOpen = false;
+function paintAnswer(i, open) {
+  ansOpen = open;
+  const qa = QA[i];
+  $('#ansList').innerHTML = qa.a.map(t => `<li>${t}</li>`).join('') + (qa.win ? `<li class="win">Winner: <span>${qa.win}</span></li>` : '');
+  $('#ansList').classList.toggle('hidden', !open);
+  $('#bAns').textContent = open ? 'Hide answer' : 'Show answer';
+}
+document.addEventListener('net:step', e => {
+  const i = e.detail.i, st = $('#story');
+  if (e.detail.state === 'select') st.innerHTML += `<span class="q"><b>Think first:</b> ${QA[i].q}</span>`;
+  paintAnswer(i, e.detail.state === 'done');
+});
+$('#bAns').onclick = () => { const b = document.querySelector('[data-s].on'); paintAnswer(b ? +b.dataset.s : 0, !ansOpen); };
+
+Net.scenarios([
+  { label: '1 Message, then a reaction', story: '<b>Use case:</b> Rahul sends <i>“Movie tonight?”</i> to the group. A minute later, Aman reacts 👍.<span class="ask"><b>What the app asks the database:</b> Save a new message. Later, save a reaction to it.</span>', setup: setup1, run: run1 },
+  { label: '2 Read', story: '<b>Use case:</b> Zoya opens the chat. She must see the message with all 3 reactions under it.<span class="ask"><b>What the app asks the database:</b> Give me message 101 with its reactions.</span>', setup: setup2, run: run2 },
+  { label: '3 Send a poll', story: '<b>Use case:</b> Om sends a poll: <i>“Which show?”</i> with options 7 PM and 10 PM.<span class="ask"><b>What the app asks the database:</b> Save a poll together with its options.</span>', setup: setup3, run: run3 },
+  { label: '3b Viral message', story: '<b>Use case:</b> The message goes viral: 6 people react at the very same moment.<span class="ask"><b>What the app asks the database:</b> Save 6 reactions to the same message, all at once.</span>', setup: setup3b, run: run3b },
+  { label: '4 Delete', story: '<b>Use case:</b> Rahul deletes his message. It has 2 reactions.<span class="ask"><b>What the app asks the database:</b> Delete message 101 and everything that belongs to it.</span>', setup: setup4, run: run4 },
+  { label: '4b Split across servers', story: '<b>Use case:</b> The app has grown, so its data is split across servers by chat. Aman and Zoya react to a message in chat 7.<span class="ask"><b>What the app asks the database:</b> Save these reactions so that chat 7 can still be read from one server.</span>', setup: setup4b, run: run4b },
+  { label: '5 New feature', story: '<b>Use case:</b> The app launches voice notes. Zoya sends a 12-second voice note.<span class="ask"><b>What the app asks the database:</b> Store a new kind of message that has a url and a duration.</span>', setup: setup5, run: run5 },
+  { label: '6 Different angle', story: '<b>Use case:</b> Zoya opens her profile stats: <i>“Which emoji do you use most?”</i><span class="ask"><b>What the app asks the database:</b> Count Zoya\'s reactions by emoji, across every chat.</span>', setup: setup6, run: run6 },
+  { label: '7 Rename a user', story: '<b>Use case:</b> Zoya changes her display name to Zoya Khan.<span class="ask"><b>What the app asks the database:</b> Show the new name on every message she has sent.</span>', setup: setup7, run: run7 },
+  { label: '8 Scoreboard', story: '<b>Use case:</b> All the steps side by side.<span class="ask"><b>What the app asks the database:</b> Which database did less work for each request?</span>', setup: setup8, run: run8 }
+], 'A chat app where every message can have reactions. Each step does the <b>same thing</b> in SQL (top) and MongoDB (bottom).');
+</script>
+</body>
+</html>

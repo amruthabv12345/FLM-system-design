@@ -1,0 +1,19 @@
+Class 59: SQL vs MongoDB on a chat app (animations/chat.html)
+
+Data: a chat message with reactions.
+  SQL:     messages (id, chat_id, sender_id, text) + reactions (message_id, user_id, emoji)
+  MongoDB: one document per message, reactions inside it
+
+Step 1  Send a message, a reaction arrives later        SQL insert + insert  vs  Mongo insert + update    -> tie
+Step 2  Read the message back                          SQL join, 1 row per reaction  vs  Mongo 1 document   -> MongoDB
+Step 3  Send a poll (options born with the message)    SQL 2 tables + transaction  vs  Mongo 1 insert   -> MongoDB
+Step 3b A viral message: many reactions at once         SQL rows in parallel  vs  Mongo updates take turns   -> SQL
+Step 4  Delete the message                             SQL rows in 2 tables  vs  Mongo 1 document            -> MongoDB
+Step 4b Sharded by chat_id: where do reactions live?   SQL needs chat_id copied into reactions (co-location) vs Mongo automatic
+Step 5  New feature: voice notes                       SQL new table / NULL columns on every shard  vs  Mongo new fields -> MongoDB
+Step 6  A different angle: Zoya's favourite emoji      SQL reads only her rows  vs  Mongo reads whole messages -> SQL
+Step 7  A user changes their name                      SQL 1 row  vs  Mongo every message (if the name was copied) -> SQL
+Step 8  Scoreboard + the rule
+
+Rule: MongoDB wins when you work with one thing as a whole (a message).
+      SQL wins when you ask across many things, or change something shared.

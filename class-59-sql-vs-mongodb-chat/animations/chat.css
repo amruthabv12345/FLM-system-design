@@ -1,0 +1,52 @@
+/* Extra pieces for the chat animation: table rows, document cards, the phone screen, counters. */
+.nd-b .rw { padding: 3px 10px; margin: 3px 0; border-radius: 6px; background: var(--soft); border: 1.5px solid var(--line); font-size: 13px; white-space: nowrap; transition: all .35s; }
+.rw.new { background: var(--good-bg); border-color: var(--good); }
+.rw.read { background: var(--amber-bg); border-color: var(--amber); }
+.rw.bad { background: var(--bad-bg); border-color: var(--bad); }
+.rw.dim { opacity: .28; }
+.rw.link { border-color: var(--purple); background: var(--purple-bg); }
+.rw.gone { opacity: 0; }
+.none { color: var(--muted); font-style: italic; font-size: 13px; padding: 6px 0; text-align: center; }
+
+.dcard { border: 2px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 7px 0; background: var(--panel); transition: all .35s; }
+.dcard.new { border-color: var(--good); background: var(--good-bg); }
+.dcard.read { border-color: var(--amber); background: var(--amber-bg); }
+.dcard.bad { border-color: var(--bad); background: var(--bad-bg); }
+.dcard.rewrite { border-color: var(--purple); background: var(--purple-bg); }
+.dcard.gone { opacity: 0; }
+.dh { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.dh .tag { text-transform: none; letter-spacing: 0; color: var(--good); }
+.dt { font-size: 14px; font-weight: 600; margin: 3px 0 6px; white-space: nowrap; }
+.rxs { display: flex; flex-wrap: wrap; gap: 4px; }
+.re { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); white-space: nowrap; transition: all .35s; }
+.re.new, .re.keep { background: var(--good-bg); border-color: var(--good); }
+.re.wait { background: var(--amber-bg); border-color: var(--amber); }
+.re.drop { opacity: .3; text-decoration: line-through; }
+
+.screen { padding: 8px; border-radius: 12px; background: var(--bg); min-height: 54px; display: flex; align-items: center; justify-content: center; }
+.bubble { padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: var(--teal-bg); border: 1px solid var(--teal); font-size: 14px; white-space: nowrap; }
+.bubble .rxs { margin-top: 6px; }
+.wait-t { color: var(--muted); font-size: 13px; font-style: italic; text-align: center; }
+
+.nd.count { min-width: 130px; }
+.nd.count .big { font-size: 34px; font-weight: 800; text-align: center; line-height: 1.1; }
+.nd.count .big small { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
+.nd.count.win { border-color: var(--good); background: var(--good-bg); }
+.nd.small { min-width: 64px; padding: 6px 8px; }
+.nd.small .nd-t { font-size: 13px; }
+
+.queries { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; border-top: 1px solid var(--line); }
+.queries.hidden { display: none; }
+.qt { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+.queries pre { margin: 0; padding: 10px 12px; border-radius: 9px; background: #15191e; color: #e7e5df; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; min-height: 64px; }
+@media (max-width: 900px) { .queries { grid-template-columns: 1fr; } }
+
+.score { border-collapse: collapse; font-size: 15px; width: 100%; text-align: left; }
+.score th { color: var(--muted); font-size: 12px; padding: 6px 10px; border-bottom: 2px solid var(--line); }
+.score td { padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.score tr.hide { opacity: 0; }
+.w { font-weight: 700; padding: 2px 10px; border-radius: 999px; font-size: 13px; }
+.w.mg { background: var(--good-bg); color: var(--good); }
+.w.sql { background: var(--purple-bg); color: var(--purple); }
+.w.tie { background: var(--soft); color: var(--muted); border: 1px solid var(--line); }
+.rule { margin-top: 14px; padding: 12px 14px; border-left: 5px solid var(--teal); background: var(--soft); font-size: 15px; line-height: 1.6; text-align: left; white-space: normal; }

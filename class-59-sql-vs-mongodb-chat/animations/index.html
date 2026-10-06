@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class 59 Animations</title>
+<link rel="stylesheet" href="net.css">
+<style>
+.intro { color: var(--muted); margin: 0 0 16px; }
+.steps { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.steps td, .steps th { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; }
+.steps th { font-size: 13px; color: var(--muted); }
+.go { display: inline-block; margin-top: 16px; text-decoration: none; padding: 10px 20px; border-radius: 10px; background: var(--teal); color: #fff; font-size: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Class 59: SQL vs MongoDB on a chat app</h1>
+    <nav class="pages">
+      <a class="on" href="index.html">Overview</a>
+      <a href="chat.html">Chat app</a>
+    </nav>
+  </header>
+  <p class="intro">One chat message with reactions, stored two ways. Each step runs the same action on both and shows which one does less work.</p>
+  <table class="steps">
+    <tr><th>Step</th><th>Action</th><th>Better</th></tr>
+    <tr><td>1</td><td>Send a message; a reaction arrives later</td><td>tie</td></tr>
+    <tr><td>2</td><td>Read the message back</td><td>MongoDB</td></tr>
+    <tr><td>3</td><td>Send a poll (its options are created with it)</td><td>MongoDB</td></tr>
+    <tr><td>3b</td><td>A viral message: many reactions at once</td><td>SQL</td></tr>
+    <tr><td>4</td><td>Delete the message</td><td>MongoDB</td></tr>
+    <tr><td>4b</td><td>Sharded by chat_id: where do the reactions live?</td><td>MongoDB</td></tr>
+    <tr><td>5</td><td>A new feature: voice notes</td><td>MongoDB</td></tr>
+    <tr><td>6</td><td>A different angle: Zoya's favourite emoji</td><td>SQL</td></tr>
+    <tr><td>7</td><td>A user changes her name</td><td>SQL</td></tr>
+    <tr><td>8</td><td>Scoreboard and the rule</td><td></td></tr>
+  </table>
+  <a class="go" href="chat.html">Open the animation</a>
+</div>
+</body>
+</html>
