@@ -1,0 +1,81 @@
+/* Extra pieces for the Redis data-type animation. */
+.story { padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--purple-bg); font-size: 16px; line-height: 1.6; }
+.story b { color: var(--purple); }
+.story .ask { display: block; margin-top: 4px; }
+.story .q { display: block; margin-top: 10px; padding: 10px 14px; border-radius: 10px; background: var(--panel); border: 2px dashed var(--amber); font-size: 17px; font-weight: 600; }
+.story .q b { color: var(--amber); }
+
+.answer { padding: 16px 18px; border-top: 1px solid var(--line); background: var(--good-bg); }
+.ans-h { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--good); }
+.answer ul { margin: 10px 0 0; padding-left: 22px; font-size: 16px; line-height: 1.7; }
+.answer ul.hidden { display: none; }
+.answer li.best, .answer li.not { list-style: none; margin-left: -22px; font-weight: 700; }
+.answer li.best span { padding: 2px 10px; border-radius: 999px; background: var(--good); color: #fff; margin-right: 8px; }
+.answer li.not span { padding: 2px 10px; border-radius: 999px; background: var(--bad); color: #fff; margin-right: 8px; }
+
+/* what the live node and the final panel show: Redis keys as cards */
+.kc { border: 2px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; background: var(--panel); transition: all .35s; text-align: left; }
+.kc.new { border-color: var(--good); background: var(--good-bg); }
+.kh { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+.kh code { font: 700 14px ui-monospace, Menlo, Consolas, monospace; }
+.kh .ty { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; padding: 1px 9px; border-radius: 999px; background: var(--amber-bg); color: var(--amber-ink); border: 1px solid var(--amber); }
+.kb .big { font: 800 34px/1.1 ui-monospace, Menlo, Consolas, monospace; }
+.kb .cap { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.kb pre { margin: 0; font: 14px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+.none { color: var(--muted); font-style: italic; font-size: 13px; padding: 8px 0; text-align: center; }
+
+.ht { border-collapse: collapse; width: 100%; font-size: 14px; }
+.ht td { padding: 4px 10px; border-top: 1px solid var(--line); }
+.ht tr:first-child td { border-top: 0; }
+.ht td:first-child { width: 90px; font: 700 13px ui-monospace, Menlo, Consolas, monospace; color: var(--purple); }
+.ht tr.new td { background: var(--good-bg); }
+
+.ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ch { padding: 4px 12px; border-radius: 8px; background: var(--soft); border: 1.5px solid var(--line); font-size: 13px; white-space: nowrap; transition: all .35s; }
+.ch i { font-style: normal; font-size: 10px; color: var(--muted); margin-right: 6px; }
+.ch.round { border-radius: 999px; }
+.ch.new { background: var(--good-bg); border-color: var(--good); }
+.ch.common { background: var(--amber-bg); border-color: var(--amber); }
+
+.zr { display: grid; grid-template-columns: 26px 70px 1fr 40px; align-items: center; gap: 8px; padding: 3px 0; font-size: 14px; }
+.zr .rk { font-weight: 800; color: var(--muted); }
+.zr .nm { font-weight: 700; }
+.zr .bar { height: 14px; border-radius: 7px; background: var(--purple); transition: width .4s; }
+.zr .sc { font: 700 13px ui-monospace, Menlo, Consolas, monospace; text-align: right; }
+.zr.new .bar { background: var(--good); }
+.zr.new .nm { color: var(--good); }
+
+.nd .cmd { font: 700 13px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; color: var(--purple); }
+.nd .rep { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: var(--bg); font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+.nd .rep.wait { color: var(--muted); }
+
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; border-top: 1px solid var(--line); }
+.two.hidden { display: none; }
+.two .qt { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+.two .qt.t { color: var(--teal); }
+.term { padding: 10px 12px; border-radius: 9px; background: #15191e; color: #e7e5df; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+.tl { padding: 3px 8px; border-left: 3px solid transparent; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+.tl.cur { background: #2a3340; border-left-color: #5dcaa5; }
+.tl .pr { color: #7e8ca0; }
+.tl .rp { color: #a8d8a0; padding-left: 2px; }
+@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+
+.score { border-collapse: collapse; font-size: 15px; width: 100%; text-align: left; }
+.score th { color: var(--muted); font-size: 12px; padding: 6px 10px; border-bottom: 2px solid var(--line); }
+.score td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.score td:first-child { font-weight: 700; }
+.score code { font: 13px ui-monospace, Menlo, Consolas, monospace; color: var(--purple); }
+.score tr.hide { opacity: 0; }
+.rule { margin-top: 14px; padding: 12px 14px; border-left: 5px solid var(--teal); background: var(--soft); font-size: 15px; line-height: 1.6; text-align: left; white-space: normal; }
+
+/* "why Redis" steps: people, app, database, counters */
+.nd.small { min-width: 70px; padding: 6px 8px; }
+.nd.small .nd-t { font-size: 13px; }
+.wt { font-size: 12px; color: var(--muted); text-align: center; white-space: nowrap; }
+.wt.ok { color: var(--good); font-weight: 700; }
+.wt.bad { color: var(--bad); font-weight: 700; }
+.nd.count .big { font-size: 32px; font-weight: 800; text-align: center; line-height: 1.1; }
+.nd.count.good { border-color: var(--good); background: var(--good-bg); }
+.nd.count.hot { border-color: var(--bad); background: var(--bad-bg); }
+.tl.cm { color: #7e8ca0; font-style: italic; }

@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redis Commands</title>
+<link rel="stylesheet" href="net.css">
+<link rel="stylesheet" href="fancy.css">
+<style>
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; border-bottom: 1px solid var(--line); }
+.intro { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 16px; border-bottom: 1px solid var(--line); }
+.intro div { padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line); font-size: 15px; line-height: 1.5; }
+.intro b { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.intro code { color: #ffb3ba; }
+.note { padding: 10px 16px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.note code { color: #b9fff1; }
+.wrapT { padding: 6px 16px 18px; overflow-x: auto; }
+table.cmds { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14.5px; }
+.cmds th { text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 12px 12px 8px; border-bottom: 1px solid var(--line); }
+.cmds td { padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, .05); vertical-align: top; }
+.cmds tr:hover td { background: rgba(167, 139, 250, .05); }
+.cmds td.n { color: var(--muted); font-size: 12px; width: 28px; }
+.cmds td.c { width: 36%; }
+.cmds td.o { width: 26%; }
+.cmd { display: inline-block; font: 600 13.5px "JetBrains Mono", ui-monospace, monospace; color: #e4dcff; background: rgba(124, 58, 237, .14); border: 1px solid rgba(167, 139, 250, .35);
+  padding: 5px 10px; border-radius: 8px; cursor: pointer; white-space: pre-wrap; word-break: break-word; transition: all .2s; }
+.cmd:hover { border-color: #a78bfa; box-shadow: 0 0 14px rgba(167, 139, 250, .4); }
+.cmd .k { color: #ff8a95; }
+.out { margin: 0; font: 13px/1.5 "JetBrains Mono", ui-monospace, monospace; color: #a8f0b8; white-space: pre-wrap; }
+.out.err { color: #fb7185; }
+.out.var { color: #fbbf24; }
+.cmds tr.g td { padding: 18px 12px 6px; border-bottom: 0; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #5eead4; }
+.cmds tr.g:hover td { background: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 16px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); }
+.legend span i { font-style: normal; font-family: "JetBrains Mono", monospace; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px; background: linear-gradient(135deg, #16a34a, #4ade80);
+  color: #fff; font-weight: 700; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+.toast.on { opacity: 1; }
+@media (max-width: 900px) { .intro { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Redis commands, type by type</h1>
+    <nav class="pages">
+      <a href="datatypes.html">Animation</a>
+      <a class="on" href="commands.html">Commands</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="tabs" id="tabs"></div>
+    <div class="intro" id="intro"></div>
+    <div class="note">Run the rows <b>top to bottom</b> in the Redis Insight CLI (or <code>redis-cli</code>). The outputs assume you did. Click any command to copy it.</div>
+    <div class="wrapT"><table class="cmds" id="table"></table></div>
+    <div class="legend">
+      <span><i style="color:#a8f0b8">green</i> = exact output</span>
+      <span><i style="color:#fbbf24">amber</i> = output varies (order, random pick, countdown)</span>
+      <span><i style="color:#fb7185">red</i> = an error, on purpose</span>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">Copied</div>
+
+<script>
+// Each tab: what the type is, then rows. A row is either a group title (a string) or
+// [command, what it does, output, style]  where style is '' (exact), 'var' (varies) or 'err'.
+const TABS = [
+  {
+    name: 'String',
+    is: 'One value under one key: text or a number (up to 512 MB).',
+    like: 'A single variable: <code>name = "Mainak"</code>',
+    use: 'Counters, cached JSON, OTPs, tokens, flags',
+    rows: [
+      'Basics',
+      ['SET user:1:name "Mainak"', 'Stores a value under a key. Creates the key, or overwrites it.', 'OK'],
+      ['GET user:1:name', 'Reads the value.', '"Mainak"'],
+      ['GET user:2:name', 'Reads a key that does not exist.', '(nil)'],
+      ['SET user:2:name "Zoya" NX', 'NX = set only if the key does Not eXist. It does not, so it is set.', 'OK'],
+      ['SET user:2:name "Aman" NX', 'The key exists now, so nothing changes.', '(nil)'],
+      ['SET user:2:name "Zoya Khan" XX', 'XX = set only if the key already eXists.', 'OK'],
+      'Many keys at once',
+      ['MSET user:3:name "Om" user:4:name "Riya"', 'Sets several keys in one call (one round trip).', 'OK'],
+      ['MGET user:1:name user:2:name user:9:name', 'Reads several keys at once. A missing key gives nil.', '1) "Mainak"\n2) "Zoya Khan"\n3) (nil)'],
+      'Working with text',
+      ['STRLEN user:1:name', 'Length of the value.', '(integer) 6'],
+      ['GETRANGE user:2:name 0 3', 'Part of the text, from index 0 to 3.', '"Zoya"'],
+      ['APPEND user:1:bio "Loves Redis"', 'Adds text at the end. Creates the key if missing. Returns the new length.', '(integer) 11'],
+      ['APPEND user:1:bio " and SQL"', 'Value is now "Loves Redis and SQL".', '(integer) 19'],
+      'Counters',
+      ['SET user:1:visits 0', 'A number is stored as text that Redis can count.', 'OK'],
+      ['INCR user:1:visits', 'Adds 1 in a single atomic step: no lost counts, even with many users at once.', '(integer) 1'],
+      ['INCRBY user:1:visits 10', 'Adds any whole number.', '(integer) 11'],
+      ['DECR user:1:visits', 'Subtracts 1.', '(integer) 10'],
+      ['DECRBY user:1:visits 3', 'Subtracts any whole number.', '(integer) 7'],
+      ['INCR user:5:visits', 'A missing key starts from 0.', '(integer) 1'],
+      ['SET product:1:price 99.5', 'A decimal number.', 'OK'],
+      ['INCRBYFLOAT product:1:price 0.25', 'Adds a decimal.', '"99.75"'],
+      ['INCR user:1:name', 'You cannot count text.', '(error) ERR value is not an integer or out of range', 'err'],
+      'Expiry (keys that delete themselves)',
+      ['SET otp:user:1 "482913" EX 60', 'Stores the value for 60 seconds only.', 'OK'],
+      ['TTL otp:user:1', 'Seconds left before it is deleted.', '(integer) 60  (then 59, 58, …)', 'var'],
+      ['TTL user:1:name', '-1 = the key has no expiry.', '(integer) -1'],
+      ['TTL user:99:name', '-2 = the key does not exist.', '(integer) -2'],
+      ['EXPIRE user:1:visits 120', 'Adds an expiry to an existing key.', '(integer) 1'],
+      ['PERSIST user:1:visits', 'Removes the expiry again.', '(integer) 1'],
+      ['GETDEL otp:user:1', 'Reads and deletes in one step: an OTP can be used only once.', '"482913"'],
+      ['EXISTS otp:user:1', 'Is the key still there?', '(integer) 0']
+    ]
+  },
+  {
+    name: 'List',
+    is: 'An ordered list of strings. You add and remove at the two ends. Duplicates are allowed.',
+    like: 'A row of items: <code>LEFT [ newest … oldest ] RIGHT</code>',
+    use: 'Recent activity, notifications, queues, stacks (undo)',
+    rows: [
+      'Add and read',
+      ['LPUSH user:1:notifications "Aman liked your post"', 'Adds to the LEFT end (the head). Creates the list. Returns the new length.', '(integer) 1'],
+      ['LPUSH user:1:notifications "Zoya followed you" "Om commented"', 'Adds two, one after the other, so "Om commented" ends up first.', '(integer) 3'],
+      ['LRANGE user:1:notifications 0 -1', 'Reads from index 0 to the end (-1 = last).', '1) "Om commented"\n2) "Zoya followed you"\n3) "Aman liked your post"'],
+      ['LRANGE user:1:notifications 0 1', 'Reads only the 2 newest.', '1) "Om commented"\n2) "Zoya followed you"'],
+      ['LLEN user:1:notifications', 'Number of items.', '(integer) 3'],
+      ['LINDEX user:1:notifications 0', 'The item at one index.', '"Om commented"'],
+      ['RPUSH user:1:notifications "Welcome to the app"', 'Adds to the RIGHT end (the tail).', '(integer) 4'],
+      'Change and trim',
+      ['LSET user:1:notifications 0 "Om commented on your post"', 'Replaces the item at an index.', 'OK'],
+      ['LTRIM user:1:notifications 0 2', 'Keeps only index 0 to 2 and deletes the rest: the list never grows too big.', 'OK'],
+      ['LPOP user:1:notifications', 'Removes and returns the LEFT item.', '"Om commented on your post"'],
+      ['RPOP user:1:notifications', 'Removes and returns the RIGHT item.', '"Aman liked your post"'],
+      ['LRANGE user:1:notifications 0 -1', 'What is left.', '1) "Zoya followed you"'],
+      'As a queue (first in, first out)',
+      ['RPUSH queue:emails "mail:101" "mail:102" "mail:103"', 'Jobs join at the right.', '(integer) 3'],
+      ['LPOP queue:emails', 'A worker takes from the left: the oldest job first.', '"mail:101"'],
+      ['LREM queue:emails 1 "mail:103"', 'Removes 1 copy of a value (a cancelled job).', '(integer) 1'],
+      ['BLPOP queue:emails 5', 'Blocking pop: takes an item, or waits up to 5 s for one. Returns the list name and the item.', '1) "queue:emails"\n2) "mail:102"'],
+      ['BLPOP queue:emails 5', 'The queue is empty, so it waits 5 seconds and gives up.', '(nil)'],
+      'As a stack (last in, first out)',
+      ['LPUSH user:1:undo "typed Hello"', 'Push an action.', '(integer) 1'],
+      ['LPUSH user:1:undo "deleted a line"', 'Push another.', '(integer) 2'],
+      ['LPOP user:1:undo', 'Undo takes the most recent action first.', '"deleted a line"']
+    ]
+  },
+  {
+    name: 'Set',
+    is: 'A collection of unique strings with no order. Adding a duplicate does nothing.',
+    like: 'A bag of unique names: <code>{ Zoya, Om, Riya }</code>',
+    use: 'Friends, likes, tags, unique visitors, mutual friends',
+    rows: [
+      'Add and check',
+      ['SADD user:1:friends "Zoya" "Om" "Riya"', 'Adds members. Returns how many were really new.', '(integer) 3'],
+      ['SADD user:1:friends "Om"', 'Om is already in the set, so nothing is added.', '(integer) 0'],
+      ['SMEMBERS user:1:friends', 'All members. The order is not guaranteed.', '1) "Zoya"\n2) "Om"\n3) "Riya"', 'var'],
+      ['SISMEMBER user:1:friends "Zoya"', 'Is Zoya a member? 1 = yes. Fast, however big the set.', '(integer) 1'],
+      ['SISMEMBER user:1:friends "Dev"', '0 = no.', '(integer) 0'],
+      ['SMISMEMBER user:1:friends "Zoya" "Dev"', 'Checks several members at once.', '1) (integer) 1\n2) (integer) 0'],
+      ['SCARD user:1:friends', 'Number of members.', '(integer) 3'],
+      'Compare two sets',
+      ['SADD user:2:friends "Om" "Riya" "Dev"', 'A second set.', '(integer) 3'],
+      ['SINTER user:1:friends user:2:friends', 'In BOTH sets: mutual friends.', '1) "Om"\n2) "Riya"', 'var'],
+      ['SUNION user:1:friends user:2:friends', 'In EITHER set, no duplicates.', '1) "Zoya"\n2) "Om"\n3) "Riya"\n4) "Dev"', 'var'],
+      ['SDIFF user:2:friends user:1:friends', 'In the first set but NOT the second: "people you may know" for user 1.', '1) "Dev"'],
+      ['SINTERSTORE mutual:user:1:user:2 user:1:friends user:2:friends', 'Same as SINTER, but saves the result as a new set.', '(integer) 2'],
+      'Remove and pick',
+      ['SREM user:1:friends "Riya"', 'Removes a member.', '(integer) 1'],
+      ['SRANDMEMBER user:1:friends', 'A random member, NOT removed.', '"Om"  (random)', 'var'],
+      'Likes on a post',
+      ['SADD post:1:likes "user:1" "user:2"', 'Two users like the post.', '(integer) 2'],
+      ['SADD post:1:likes "user:1"', 'User 1 taps like again: ignored, no double count.', '(integer) 0'],
+      ['SCARD post:1:likes', 'The like count.', '(integer) 2'],
+      ['SREM post:1:likes "user:2"', 'User 2 unlikes.', '(integer) 1'],
+      'Giveaway winner',
+      ['SADD contest:1:entries "user:1" "user:2" "user:3"', 'Everyone enters once.', '(integer) 3'],
+      ['SPOP contest:1:entries', 'Picks a random member AND removes it: the winner.', '"user:2"  (random)', 'var']
+    ]
+  },
+  {
+    name: 'Hash',
+    is: 'Fields and values under one key. Read or change one field without touching the rest.',
+    like: 'One object or row: <code>user:1 → { name, city, age }</code>',
+    use: 'User profiles, sessions, shopping carts, settings',
+    rows: [
+      'Create and read',
+      ['HSET user:1 name "Mainak" city "Pune" age 30', 'Sets several fields. Returns how many fields were new.', '(integer) 3'],
+      ['HGET user:1 name', 'One field.', '"Mainak"'],
+      ['HMGET user:1 name city email', 'Several fields. A missing field gives nil.', '1) "Mainak"\n2) "Pune"\n3) (nil)'],
+      ['HGETALL user:1', 'Every field and value, one after the other.', '1) "name"\n2) "Mainak"\n3) "city"\n4) "Pune"\n5) "age"\n6) "30"'],
+      'Update',
+      ['HSET user:1 city "Bengaluru"', 'Changes only the city. 0 = the field existed, it was updated.', '(integer) 0'],
+      ['HSETNX user:1 city "Delhi"', 'Sets only if the field does not exist. It does, so no change.', '(integer) 0'],
+      ['HSETNX user:1 email "mainak@example.com"', 'The email field is new, so it is set.', '(integer) 1'],
+      ['HINCRBY user:1 age 1', 'Adds to a number field in one step.', '(integer) 31'],
+      ['HINCRBYFLOAT user:1 wallet 99.5', 'Adds a decimal. Creates the field.', '"99.5"'],
+      'Inspect',
+      ['HEXISTS user:1 email', 'Does the field exist?', '(integer) 1'],
+      ['HKEYS user:1', 'Field names only.', '1) "name"\n2) "city"\n3) "age"\n4) "email"\n5) "wallet"'],
+      ['HVALS user:1', 'Values only.', '1) "Mainak"\n2) "Bengaluru"\n3) "31"\n4) "mainak@example.com"\n5) "99.5"'],
+      ['HLEN user:1', 'Number of fields.', '(integer) 5'],
+      ['HSTRLEN user:1 name', 'Length of one field\'s value.', '(integer) 6'],
+      ['HDEL user:1 wallet', 'Removes one field. The key stays.', '(integer) 1'],
+      'A shopping cart',
+      ['HSET cart:user:1 product:7 2 product:9 1', 'Field = product, value = quantity.', '(integer) 2'],
+      ['HINCRBY cart:user:1 product:7 1', 'One more of product 7.', '(integer) 3'],
+      ['HDEL cart:user:1 product:9', 'Remove product 9 from the cart.', '(integer) 1'],
+      ['HGETALL cart:user:1', 'The cart now.', '1) "product:7"\n2) "3"']
+    ]
+  },
+  {
+    name: 'Sorted set',
+    is: 'Unique members, each with a score. Redis keeps them sorted by score at all times.',
+    like: 'A ranked table: <code>user:3 → 150, user:1 → 120, …</code>',
+    use: 'Leaderboards, top N, priority queues, items ordered by time',
+    rows: [
+      'Add and read in order',
+      ['ZADD leaderboard:game:1 120 "user:1" 95 "user:2" 150 "user:3"', 'Adds members with scores (score first, then member).', '(integer) 3'],
+      ['ZRANGE leaderboard:game:1 0 -1', 'All members, LOWEST score first.', '1) "user:2"\n2) "user:1"\n3) "user:3"'],
+      ['ZRANGE leaderboard:game:1 0 -1 WITHSCORES', 'Same, with the scores.', '1) "user:2"\n2) "95"\n3) "user:1"\n4) "120"\n5) "user:3"\n6) "150"'],
+      ['ZREVRANGE leaderboard:game:1 0 1 WITHSCORES', 'HIGHEST first, top 2 only: the leaderboard screen.', '1) "user:3"\n2) "150"\n3) "user:1"\n4) "120"'],
+      ['ZRANGE leaderboard:game:1 0 1 REV WITHSCORES', 'The newer way to write the same thing (REV = reverse).', '1) "user:3"\n2) "150"\n3) "user:1"\n4) "120"'],
+      'Score and rank',
+      ['ZSCORE leaderboard:game:1 "user:1"', 'One member\'s score.', '"120"'],
+      ['ZRANK leaderboard:game:1 "user:1"', 'Position from the LOWEST, starting at 0.', '(integer) 1'],
+      ['ZREVRANK leaderboard:game:1 "user:1"', 'Position from the HIGHEST, starting at 0. So user 1 is 2nd.', '(integer) 1'],
+      ['ZINCRBY leaderboard:game:1 50 "user:1"', 'Adds 50 points. Returns the new score.', '"170"'],
+      ['ZREVRANK leaderboard:game:1 "user:1"', 'User 1 is now first. Nobody re-sorted anything.', '(integer) 0'],
+      ['ZADD leaderboard:game:1 160 "user:2"', 'ZADD on an existing member updates its score. 0 = nothing new added.', '(integer) 0'],
+      ['ZADD leaderboard:game:1 GT 100 "user:3"', 'GT = update only if the new score is Greater. 100 < 150, so no change.', '(integer) 0'],
+      'Count and filter by score',
+      ['ZCARD leaderboard:game:1', 'Number of members.', '(integer) 3'],
+      ['ZCOUNT leaderboard:game:1 155 200', 'How many have a score between 155 and 200.', '(integer) 2'],
+      ['ZRANGEBYSCORE leaderboard:game:1 155 200 WITHSCORES', 'Members in that score range, lowest first.', '1) "user:2"\n2) "160"\n3) "user:1"\n4) "170"'],
+      ['ZREVRANGE leaderboard:game:1 0 -1 WITHSCORES', 'The full leaderboard now.', '1) "user:1"\n2) "170"\n3) "user:2"\n4) "160"\n5) "user:3"\n6) "150"'],
+      ['ZREM leaderboard:game:1 "user:3"', 'Removes a member.', '(integer) 1'],
+      'As a priority queue (lowest score = do it first)',
+      ['ZADD tasks:queue 1 "send-otp" 5 "send-newsletter" 3 "resize-image"', 'Score = priority.', '(integer) 3'],
+      ['ZPOPMIN tasks:queue', 'Removes and returns the LOWEST score: the most urgent task.', '1) "send-otp"\n2) "1"'],
+      ['ZRANGE tasks:queue 0 -1 WITHSCORES', 'What is left, in order.', '1) "resize-image"\n2) "3"\n3) "send-newsletter"\n4) "5"']
+    ]
+  },
+  {
+    name: 'Real uses',
+    is: 'The same few types, combined with expiry, solve most everyday backend problems.',
+    like: 'Recipes: <code>type + expiry = feature</code>',
+    use: 'Cache, sessions, rate limiting, counters, leaderboards',
+    rows: [
+      'Cache (String + expiry)',
+      ['SET cache:product:5 \'{"name":"Phone","price":999}\' EX 60', 'After a slow DB read, keep a copy for 60 s.', 'OK'],
+      ['GET cache:product:5', 'Next request: served from RAM, the DB is skipped.', '"{\\"name\\":\\"Phone\\",\\"price\\":999}"'],
+      ['TTL cache:product:5', 'The copy deletes itself, so it is never older than 60 s.', '(integer) 60  (counting down)', 'var'],
+      'Session store (Hash + expiry)',
+      ['HSET session:abc123 user_id 1 role "admin"', 'On login: who the user is. Every app server can read it.', '(integer) 2'],
+      ['EXPIRE session:abc123 1800', 'Logged out after 30 minutes.', '(integer) 1'],
+      ['HGET session:abc123 user_id', 'On each request: which user is this?', '"1"'],
+      ['EXPIRE session:abc123 1800', 'Each request resets the 30 minutes (stay logged in while active).', '(integer) 1'],
+      ['DEL session:abc123', 'On logout.', '(integer) 1'],
+      'Rate limiting (counter + expiry)',
+      ['INCR rate:user:1', 'Count this request. First one this minute.', '(integer) 1'],
+      ['EXPIRE rate:user:1 60 NX', 'Start a 60 s window, only if one is not running yet (NX).', '(integer) 1'],
+      ['INCR rate:user:1', 'Next request. If the count goes over the limit (say 100), the app replies 429 Too Many Requests.', '(integer) 2'],
+      ['EXPIRE rate:user:1 60 NX', 'Window already running, so it is not extended.', '(integer) 0'],
+      ['TTL rate:user:1', 'When the key expires, the count starts again from 0.', '(integer) 60  (counting down)', 'var'],
+      'Counter and leaderboard',
+      ['INCR post:1:views', 'Atomic view counter.', '(integer) 1'],
+      ['ZINCRBY leaderboard:weekly 10 "user:1"', 'Give user 1 ten points this week.', '"10"'],
+      ['ZREVRANGE leaderboard:weekly 0 9 WITHSCORES', 'The weekly top 10.', '1) "user:1"\n2) "10"']
+    ]
+  },
+  {
+    name: 'Keys (any type)',
+    is: 'Commands that work on any key, whatever its type.',
+    like: 'Looking at the labels, not what is inside: <code>user:1, user:1:friends, …</code>',
+    use: 'Finding, checking, renaming, expiring and deleting keys',
+    rows: [
+      'Find and inspect',
+      ['KEYS user:*', 'Every key that matches the pattern. Fine on your laptop; never in production (it blocks Redis on millions of keys).', 'every key starting with "user:"  (order varies)', 'var'],
+      ['SCAN 0 MATCH user:* COUNT 100', 'The safe way: returns a batch plus a cursor. Call again with the cursor until it is 0.', '1) "0"   ← next cursor, 0 = finished\n2) 1) "user:1"\n   2) "user:1:name"\n   …', 'var'],
+      ['TYPE user:1', 'The type of a key.', 'hash'],
+      ['TYPE user:1:friends', '', 'set'],
+      ['TYPE leaderboard:game:1', 'A sorted set is called zset.', 'zset'],
+      ['EXISTS user:1 user:9', 'How many of these keys exist.', '(integer) 1'],
+      ['DBSIZE', 'Number of keys in the database.', '(integer) <number of keys>', 'var'],
+      'Rename and delete',
+      ['RENAME user:4:name user:40:name', 'Renames a key.', 'OK'],
+      ['DEL user:3:name user:40:name', 'Deletes keys. Returns how many were deleted.', '(integer) 2'],
+      ['UNLINK cart:user:1', 'Like DEL, but frees the memory in the background (better for big keys).', '(integer) 1'],
+      'Expiry, on any type',
+      ['EXPIRE user:1:friends 30', 'Any key can expire, not just strings.', '(integer) 1'],
+      ['TTL user:1:friends', 'Seconds left.', '(integer) 30  (counting down)', 'var'],
+      ['PERSIST user:1:friends', 'Keep it forever again.', '(integer) 1'],
+      'Start fresh',
+      ['FLUSHDB', 'Deletes EVERY key in the current database. Careful!', 'OK']
+    ]
+  }
+];
+
+const $ = s => document.querySelector(s);
+const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// colour the key in each command so students see the naming pattern
+const paintCmd = c => esc(c).replace(/^(\S+)(\s+)(\S+)/, (m, a, sp, k) => a + sp + (/^[a-z]/.test(k) ? `<span class="k">${k}</span>` : k));
+
+function show(i) {
+  const T = TABS[i];
+  document.querySelectorAll('#tabs button').forEach((b, j) => b.classList.toggle('primary', j === i));
+  $('#intro').innerHTML = `<div><b>What it is</b>${T.is}</div><div><b>Think of it as</b>${T.like}</div><div><b>Use it for</b>${T.use}</div>`;
+  let n = 0;
+  $('#table').innerHTML = '<tr><th>#</th><th>Command</th><th>What it does</th><th>Expected output</th></tr>'
+    + T.rows.map(r => {
+      if (typeof r === 'string') return `<tr class="g"><td colspan="4">${r}</td></tr>`;
+      n++;
+      return `<tr><td class="n">${n}</td><td class="c"><span class="cmd" data-c="${esc(r[0])}">${paintCmd(r[0])}</span></td>`
+        + `<td>${r[1]}</td><td class="o"><pre class="out ${r[3] || ''}">${esc(r[2])}</pre></td></tr>`;
+    }).join('');
+  try { localStorage.setItem('redisTab', i); } catch (e) {}
+}
+
+$('#tabs').innerHTML = TABS.map((T, i) => `<button data-i="${i}">${T.name}</button>`).join('');
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) show(+b.dataset.i); };
+$('#table').onclick = e => {
+  const c = e.target.closest('.cmd');
+  if (!c) return;
+  const done = () => { $('#toast').classList.add('on'); setTimeout(() => $('#toast').classList.remove('on'), 900); };
+  if (navigator.clipboard) navigator.clipboard.writeText(c.dataset.c).then(done, () => {});
+};
+let start = 0;
+try { start = +(localStorage.getItem('redisTab') || 0); } catch (e) {}
+show(start < TABS.length ? start : 0);
+</script>
+</body>
+</html>

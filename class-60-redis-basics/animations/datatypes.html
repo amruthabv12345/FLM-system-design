@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redis Data Types</title>
+<link rel="stylesheet" href="net.css">
+<link rel="stylesheet" href="redis.css">
+<link rel="stylesheet" href="fancy.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Redis: why we need it, then its data types</h1>
+    <nav class="pages">
+      <a class="on" href="datatypes.html">Animation</a>
+      <a href="commands.html">Commands</a>
+    </nav>
+  </header>
+  <div class="box">
+    <div class="row"><div class="row-t">Type</div><div class="row-c" id="scen"></div></div>
+    <div class="story" id="story"></div>
+    <div id="msg"><div id="msgText"></div><div class="ctl"><button id="bPause"></button><button id="bStep" disabled>Next step &#8594;</button></div></div>
+    <div id="stage"></div>
+    <div class="two" id="final">
+      <div><div class="qt" id="t1">Commands you type in redis-cli</div><div class="term" id="term"></div></div>
+      <div><div class="qt t" id="t2">What Redis holds at the end</div><div id="endView"></div></div>
+    </div>
+    <div class="answer" id="answer">
+      <div class="ans-h"><span>The answer</span><button id="bAns">Show answer</button></div>
+      <ul id="ansList"></ul>
+    </div>
+    <div class="footer">
+      <label>Speed <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1" autocomplete="off"></label>
+      <span class="hint">Space = start / pause, &#8594; = next step</span>
+      <span class="sp"></span>
+      <button id="bRestart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script src="net-core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+Net.mount(440, 1.1);
+
+const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const say = (html, kind) => Net.say(html, kind);
+
+// ---------- how a key looks ----------
+const card = (key, type, body, isNew) =>
+  `<div class="kc ${isNew ? 'new' : ''}"><div class="kh"><code>${key}</code><span class="ty">${type}</span></div><div class="kb">${body}</div></div>`;
+const NONE = '<div class="none">no keys yet</div>';
+const chip = (t, cls, i) => `<span class="ch ${cls || ''}">${i === undefined ? '' : '<i>' + i + '</i>'}${esc(t)}</span>`;
+
+// ---------- the five types: state, view, commands ----------
+const TYPES = [
+  {
+    label: '1 String',
+    story: '<b>Use case:</b> A news site counts how many people opened a page, and keeps one product\'s details ready for the next visitor.<span class="ask"><b>What the app asks Redis:</b> Count every visit. Remember the product details so the database is not asked again.</span>',
+    q: '1,000 people open the page in the same second. How does Redis count them without losing a single visit?',
+    init: () => ({ views: null, prod: null, hl: [] }),
+    view: s => {
+      const c = [];
+      if (s.views !== null) c.push(card('page:views', 'string', `<div class="big">${s.views}</div><div class="cap">text that looks like a number, so it can be counted</div>`, s.hl.includes('views')));
+      if (s.prod) c.push(card('product:5', 'string', `<pre>${esc(s.prod)}</pre><div class="cap">Redis sees only text. It does not know there is a price inside.</div>`, s.hl.includes('prod')));
+      return c.join('') || NONE;
+    },
+    steps: [
+      { cmd: 'SET page:views 100', say: '<b>SET</b> creates the key and stores the value 100.', apply: s => { s.views = 100; s.hl = ['views']; }, reply: () => 'OK' },
+      { cmd: 'GET page:views', say: '<b>GET</b> reads the value back. Nothing changes.', apply: s => {}, reply: s => '"' + s.views + '"' },
+      { cmd: 'INCR page:views', say: '<b>INCR</b> adds 1 in a single step. Redis runs one command at a time, so 1,000 visitors at once still give exactly +1000.', apply: s => { s.views++; s.hl = ['views']; }, reply: s => '(integer) ' + s.views },
+      { cmd: 'INCRBY page:views 10', say: '<b>INCRBY</b> adds any number, again in one step.', apply: s => { s.views += 10; s.hl = ['views']; }, reply: s => '(integer) ' + s.views },
+      { cmd: 'SET product:5 \'{"name":"Phone","price":999}\'', say: 'A String can also hold any text, for example a <b>cached JSON</b> that took the database a long time to build.', apply: s => { s.prod = '{"name":"Phone","price":999}'; s.hl = ['prod']; }, reply: () => 'OK' },
+      { cmd: 'GET product:5', say: 'Back it comes, exactly as stored. To change just the price you would have to <b>read it all, change it, and write it all back</b>. That is the limit of a String.', apply: s => {}, reply: s => '"{\\"name\\":\\"Phone\\",\\"price\\":999}"' }
+    ],
+    end: 'Redis now holds 2 keys: a counter at 111 and a cached JSON text.',
+    answer: [
+      'A String is <b>one value</b>: text or a number, up to 512 MB.',
+      '<b>INCR</b> is a single atomic step, so the app never reads, adds and writes back (where two visitors could overwrite each other).',
+      'You can only read or replace the <b>whole</b> value. Changing one part of a JSON means rewriting all of it.',
+      'When you need to change single fields, use a Hash (next step).'
+    ],
+    best: 'counters, cached pages or JSON, one-time codes, tokens',
+    not: 'objects where you update one field at a time'
+  },
+  {
+    label: '2 Hash',
+    story: '<b>Use case:</b> Zoya\'s profile has a name, a city and an age. She moves to Delhi and has a birthday.<span class="ask"><b>What the app asks Redis:</b> Store the profile. Change only her city. Add 1 to her age. Show the whole profile.</span>',
+    q: 'You saved the profile as one JSON String. Only the city changed. What must you send back to Redis, and is there a better type?',
+    init: () => ({ f: [], hl: [] }),
+    view: s => !s.f.length ? NONE : card('user:7', 'hash',
+      '<table class="ht">' + s.f.map(r => `<tr class="${s.hl.includes(r[0]) ? 'new' : ''}"><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join('') + '</table>'),
+    steps: [
+      { cmd: 'HSET user:7 name Zoya city Pune age 24', say: '<b>HSET</b> stores several fields under one key. Like a row, but with no table and no schema.', apply: s => { s.f = [['name', 'Zoya'], ['city', 'Pune'], ['age', 24]]; s.hl = ['name', 'city', 'age']; }, reply: () => '(integer) 3' },
+      { cmd: 'HGET user:7 name', say: '<b>HGET</b> reads one field. Redis does not send the rest.', apply: s => { s.hl = ['name']; }, reply: () => '"Zoya"' },
+      { cmd: 'HSET user:7 city Delhi', say: 'Zoya moves. Only the <b>city field</b> is sent and changed. Name and age are untouched. The reply 0 means "the field existed, it was updated".', apply: s => { s.f[1][1] = 'Delhi'; s.hl = ['city']; }, reply: () => '(integer) 0' },
+      { cmd: 'HINCRBY user:7 age 1', say: '<b>HINCRBY</b> adds to a number field in one step: the same trick as INCR, but inside the hash.', apply: s => { s.f[2][1]++; s.hl = ['age']; }, reply: s => '(integer) ' + s.f[2][1] },
+      { cmd: 'HGETALL user:7', say: '<b>HGETALL</b> returns every field and value, ready to build the profile screen.', apply: s => { s.hl = ['name', 'city', 'age']; }, reply: s => s.f.map((r, i) => (2 * i + 1) + ') "' + r[0] + '"\n' + (2 * i + 2) + ') "' + r[1] + '"').join('\n') },
+      { cmd: 'HDEL user:7 city', say: '<b>HDEL</b> removes one field. The key stays.', apply: s => { s.f = s.f.filter(r => r[0] !== 'city'); s.hl = []; }, reply: () => '(integer) 1' }
+    ],
+    end: 'Redis now holds one hash with 2 fields: name and age.',
+    answer: [
+      'A Hash is <b>fields and values under one key</b>, like one object or one row.',
+      'With a String you rewrite the whole JSON to change one field. With a Hash you send <b>only that field</b>.',
+      'HGET reads one field, HGETALL reads all, HINCRBY counts inside a field.',
+      'The values are flat text or numbers. A hash inside a hash is not possible.'
+    ],
+    best: 'user profiles, sessions, small objects with a few fields',
+    not: 'nested data, or data you need to search across many keys'
+  },
+  {
+    label: '3 List',
+    story: '<b>Use case:</b> The notification bell on a social app. Newest on top, and the list must stay short.<span class="ask"><b>What the app asks Redis:</b> Add a new notification. Show the latest ones, newest first. Keep only the newest 2. Hand out the oldest one to be processed.</span>',
+    q: 'The bell must show the newest notification first. Which Redis type keeps the order for you?',
+    init: () => ({ items: [], hl: [] }),
+    view: s => !s.items.length ? NONE : card('notif:7', 'list',
+      '<div class="ends"><span>&#9664; LEFT = newest (LPUSH, LPOP)</span><span>RIGHT = oldest (RPUSH, RPOP) &#9654;</span></div>'
+      + '<div class="chips">' + s.items.map((t, i) => chip(t, s.hl.includes(t) ? 'new' : '', i)).join('') + '</div>'),
+    steps: [
+      { cmd: 'LPUSH notif:7 "Aman liked your post"', say: '<b>LPUSH</b> puts an item at the <b>left</b> end. The key is created.', apply: s => { s.items.unshift('Aman liked your post'); s.hl = ['Aman liked your post']; }, reply: s => '(integer) ' + s.items.length },
+      { cmd: 'LPUSH notif:7 "Om followed you"', say: 'The next one goes to the left again, so the older item moves one place right.', apply: s => { s.items.unshift('Om followed you'); s.hl = ['Om followed you']; }, reply: s => '(integer) ' + s.items.length },
+      { cmd: 'LPUSH notif:7 "Riya commented"', say: 'Newest is always at position 0. Redis keeps the order, the app never sorts.', apply: s => { s.items.unshift('Riya commented'); s.hl = ['Riya commented']; }, reply: s => '(integer) ' + s.items.length },
+      { cmd: 'LRANGE notif:7 0 -1', say: '<b>LRANGE</b> reads a window of the list. 0 to -1 means everything. Use <code>0 4</code> for the latest five.', apply: s => { s.hl = s.items.slice(); }, reply: s => s.items.map((t, i) => (i + 1) + ') "' + t + '"').join('\n') },
+      { cmd: 'LTRIM notif:7 0 1', say: '<b>LTRIM</b> keeps positions 0 to 1 and throws the rest away. Do it after every LPUSH and the list <b>never grows</b>.', apply: s => { s.items = s.items.slice(0, 2); s.hl = []; }, reply: () => 'OK' },
+      { cmd: 'RPOP notif:7', say: '<b>RPOP</b> takes the item from the right end, the oldest. LPUSH in, RPOP out is a <b>queue</b>: first in, first out.', apply: s => { s.items.pop(); s.hl = []; }, reply: () => '"Om followed you"' },
+      { cmd: 'LLEN notif:7', say: '<b>LLEN</b> says how many items are in the list.', apply: s => {}, reply: s => '(integer) ' + s.items.length }
+    ],
+    end: 'Redis now holds a list with one item: "Riya commented".',
+    answer: [
+      'A List is <b>ordered</b> and keeps duplicates. LPUSH adds on the left, RPUSH on the right.',
+      'LPUSH + LRANGE gives a newest-first feed. LPUSH + <b>LTRIM</b> keeps it at a fixed size.',
+      'LPUSH + <b>RPOP</b> is a simple queue: first in, first out.',
+      'Looking for an item in the middle means walking the list, so it is slow for long lists.'
+    ],
+    best: 'recent activity, notification feeds, simple job queues',
+    not: 'unique items, or looking up an item by its value'
+  },
+  {
+    label: '4 Set',
+    story: '<b>Use case:</b> Aman and Zoya each have a friends list. The app wants to suggest people they both know.<span class="ask"><b>What the app asks Redis:</b> Add friends to each person. Is Zoya a friend of Aman? How many friends does Aman have? Who are the mutual friends?</span>',
+    q: 'Which friends do Aman and Zoya have in common? Who does the comparing: your app or Redis?',
+    init: () => ({ a: [], z: [], hl: [], inter: [] }),
+    view: s => {
+      const c = [];
+      const row = (key, arr, who) => card(key, 'set', '<div class="chips">' + arr.map(t => chip(t, s.inter.includes(t) ? 'common round' : (s.hl.includes(who + t) ? 'new round' : 'round'))).join('') + '</div>');
+      if (s.a.length) c.push(row('friends:Aman', s.a, 'a'));
+      if (s.z.length) c.push(row('friends:Zoya', s.z, 'z'));
+      return c.join('') || NONE;
+    },
+    steps: [
+      { cmd: 'SADD friends:Aman Zoya Om Riya', say: '<b>SADD</b> adds members to a set. It replies with how many were really new.', apply: s => { s.a = ['Zoya', 'Om', 'Riya']; s.hl = ['aZoya', 'aOm', 'aRiya']; }, reply: () => '(integer) 3' },
+      { cmd: 'SADD friends:Zoya Aman Om Riya Dev', say: 'A second set, for Zoya.', apply: s => { s.z = ['Aman', 'Om', 'Riya', 'Dev']; s.hl = ['zAman', 'zOm', 'zRiya', 'zDev']; }, reply: () => '(integer) 4' },
+      { cmd: 'SADD friends:Zoya Om', say: 'Om is <b>already</b> in Zoya\'s set, so nothing is added. The reply is 0. A set never holds a duplicate.', apply: s => { s.hl = []; }, reply: () => '(integer) 0' },
+      { cmd: 'SISMEMBER friends:Aman Zoya', say: '<b>SISMEMBER</b> asks "is Zoya in the set?" The answer comes in one step, however big the set is.', apply: s => { s.hl = ['aZoya']; }, reply: () => '(integer) 1' },
+      { cmd: 'SCARD friends:Aman', say: '<b>SCARD</b> counts the members.', apply: s => { s.hl = []; }, reply: s => '(integer) ' + s.a.length },
+      { cmd: 'SINTER friends:Aman friends:Zoya', say: '<b>SINTER</b> returns what both sets share. Redis does the comparing, your app runs no loop. (The order of the reply is not guaranteed.)', apply: s => { s.inter = s.a.filter(t => s.z.includes(t)); s.hl = []; }, reply: s => s.inter.map((t, i) => (i + 1) + ') "' + t + '"').join('\n') },
+      { cmd: 'SREM friends:Aman Riya', say: '<b>SREM</b> removes a member.', apply: s => { s.a = s.a.filter(t => t !== 'Riya'); s.inter = []; s.hl = []; }, reply: () => '(integer) 1' }
+    ],
+    end: 'Redis now holds two sets: Aman with 2 friends, Zoya with 4.',
+    answer: [
+      'A Set holds <b>unique</b> members with no order. Adding a duplicate does nothing (the reply is 0).',
+      '<b>SISMEMBER</b> checks membership in one step, however large the set.',
+      '<b>SINTER, SUNION, SDIFF</b> compare whole sets inside Redis. No loops in your app.',
+      'There is no position and no score: if order matters, use a List or a Sorted set.'
+    ],
+    best: 'unique visitors, tags, who liked a post, mutual friends',
+    not: 'anything that needs order or a ranking'
+  },
+  {
+    label: '5 Sorted set',
+    story: '<b>Use case:</b> A game shows a live leaderboard. Scores change all the time.<span class="ask"><b>What the app asks Redis:</b> Save each player\'s score. Show the top players. Add points to a player. Tell a player their rank.</span>',
+    q: 'Scores keep changing and the screen must show the top 3, highest first. Who keeps them sorted: your app or Redis?',
+    init: () => ({ m: { Aman: null, Zoya: null, Om: null }, hl: [] }),
+    view: s => {
+      const rows = Object.keys(s.m).filter(k => s.m[k] !== null).sort((a, b) => s.m[b] - s.m[a]);
+      if (!rows.length) return NONE;
+      const max = Math.max(...rows.map(k => s.m[k]));
+      return card('leaderboard', 'sorted set', rows.map((k, i) =>
+        `<div class="zr ${s.hl.includes(k) ? 'new' : ''}"><span class="rk">#${i + 1}</span><span class="nm">${k}</span><div class="bar" style="width:${Math.round(s.m[k] / max * 100)}%"></div><span class="sc">${s.m[k]}</span></div>`).join(''));
+    },
+    steps: [
+      { cmd: 'ZADD leaderboard 120 Aman 95 Zoya 150 Om', say: '<b>ZADD</b> adds members, each with a <b>score</b>. Redis files them in score order straight away.', apply: s => { s.m = { Aman: 120, Zoya: 95, Om: 150 }; s.hl = ['Aman', 'Zoya', 'Om']; }, reply: () => '(integer) 3' },
+      { cmd: 'ZREVRANGE leaderboard 0 -1 WITHSCORES', say: '<b>ZREVRANGE</b> reads from the highest score down. Nobody sorted anything in the app.', apply: s => { s.hl = []; }, reply: () => '1) "Om"\n2) "150"\n3) "Aman"\n4) "120"\n5) "Zoya"\n6) "95"' },
+      { cmd: 'ZADD leaderboard 160 Zoya', say: 'Zoya scores again. Her <b>score is updated</b> (reply 0 = she already existed) and she jumps to the top.', apply: s => { s.m.Zoya = 160; s.hl = ['Zoya']; }, reply: () => '(integer) 0' },
+      { cmd: 'ZINCRBY leaderboard 50 Aman', say: '<b>ZINCRBY</b> adds points to a score. Aman overtakes everyone.', apply: s => { s.m.Aman += 50; s.hl = ['Aman']; }, reply: s => '"' + s.m.Aman + '"' },
+      { cmd: 'ZREVRANK leaderboard Zoya', say: '<b>ZREVRANK</b> tells a player their position. 0 means first place, so Zoya is second.', apply: s => { s.hl = ['Zoya']; }, reply: () => '(integer) 1' },
+      { cmd: 'ZSCORE leaderboard Om', say: '<b>ZSCORE</b> reads one player\'s score.', apply: s => { s.hl = ['Om']; }, reply: () => '"150"' },
+      { cmd: 'ZREVRANGE leaderboard 0 1', say: 'The top 2 only: positions 0 and 1. This is the whole "top N" screen in one command.', apply: s => { s.hl = ['Aman', 'Zoya']; }, reply: () => '1) "Aman"\n2) "Zoya"' }
+    ],
+    end: 'Redis now holds a leaderboard: Aman 170, Zoya 160, Om 150.',
+    answer: [
+      'A Sorted set is a Set where every member has a <b>score</b>, and Redis keeps it sorted by score at all times.',
+      'ZADD on an existing member just <b>updates the score</b>, and its rank changes by itself.',
+      '<b>ZREVRANGE</b> gives the top N, <b>ZREVRANK</b> gives a position, and both stay fast even with millions of members.',
+      'Members are unique. Two players can share a score, but never a name.'
+    ],
+    best: 'leaderboards, top movies, ranked feeds, jobs ordered by time',
+    not: 'plain collections that have no score or ranking'
+  }
+];
+
+// ---------- run one type ----------
+let REPLIES = [];
+function paintLive(T, st) { Net.set('key', { body: T.view(st) }); }
+function setCli(cmd, reply) {
+  Net.set('cli', { body: `<div class="cmd">${esc(cmd)}</div><div class="rep ${reply === null ? 'wait' : ''}">${reply === null ? '…' : esc(reply)}</div>` });
+}
+function markCur(k) { document.querySelectorAll('.tl').forEach((e, i) => e.classList.toggle('cur', i === k)); }
+
+function setupType(T) {
+  Net.group({ x: 340, y: 14, w: 650, h: 412, label: 'Redis server · every key lives in RAM' });
+  Net.node('cli', { x: 150, y: 220, label: '💻 redis-cli', kind: 'client', w: 250, body: '<div class="rep wait">waiting…</div>' });
+  Net.node('key', { x: 665, y: 224, label: '⚡ Keys in Redis', kind: 'lb', w: 560, body: T.view(T.init()) });
+  Net.link('cli', 'key');
+  // the transcript and the final picture are worked out up front, so they are always visible
+  const sim = T.init();
+  REPLIES = [];
+  T.steps.forEach(s => { s.apply(sim); REPLIES.push(s.reply(sim)); });
+  sim.hl = []; sim.inter = sim.inter;
+  $('#term').innerHTML = T.steps.map((s, i) =>
+    `<div class="tl"><span class="pr">127.0.0.1:6379&gt;</span> ${esc(s.cmd)}<div class="rp">${esc(REPLIES[i])}</div></div>`).join('');
+  $('#endView').innerHTML = T.view(Object.assign({}, sim, { hl: [], inter: [] }));
+  setPanel('Commands you type in redis-cli', null, 'What Redis holds at the end', null);
+  $('#final').classList.remove('hidden');
+}
+async function runType(ctx, T) {
+  const st = T.init();
+  say('We will type ' + T.steps.length + ' commands in <b>redis-cli</b>, one after the other. Watch the key on the right change.');
+  await Net.beat(ctx);
+  for (let k = 0; k < T.steps.length; k++) {
+    const S = T.steps[k];
+    markCur(k);
+    setCli(S.cmd, null);
+    say('<b>Command ' + (k + 1) + ' of ' + T.steps.length + ':</b> ' + S.say);
+    await Net.send('cli', 'key', { label: S.cmd.split(' ')[0], dur: 900 });
+    Net.check(ctx);
+    st.hl = [];
+    S.apply(st);
+    paintLive(T, st);
+    Net.flash('key', 'ok');
+    setCli(S.cmd, REPLIES[k]);
+    await Net.beat(ctx, 3000);
+  }
+  markCur(-1);
+  say('<b>Done.</b> ' + T.end, 'win');
+}
+
+// ---------- step 6: the cheat sheet ----------
+const SHEET = [
+  ['String', 'one value', 'counter, cached JSON, token', 'SET GET INCR'],
+  ['Hash', 'fields and values', 'user profile, session', 'HSET HGET HGETALL'],
+  ['List', 'ordered, keeps duplicates', 'newest-first feed, queue', 'LPUSH LRANGE RPOP'],
+  ['Set', 'unique, no order', 'likes, tags, mutual friends', 'SADD SISMEMBER SINTER'],
+  ['Sorted set', 'unique, ordered by score', 'leaderboard, top N', 'ZADD ZREVRANGE ZINCRBY']
+];
+function sheetHTML(shown, rule) {
+  return '<table class="score"><tr><th>Type</th><th>It is…</th><th>Use it for</th><th>Main commands</th></tr>'
+    + SHEET.map((r, i) => `<tr class="${i < shown ? '' : 'hide'}"><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><code>${r[3]}</code></td></tr>`).join('')
+    + '</table>'
+    + (rule ? '<div class="rule"><b>The rule:</b> choose the type by <b>how you will read the data</b>, not by how it looks.<br>One value → String · Fields of one thing → Hash · Newest first → List · Unique, then compare → Set · Ranked by a number → Sorted set.</div>' : '');
+}
+function setupSheet() {
+  Net.node('board', { x: 500, y: 220, label: '✨ Cheat sheet', kind: 'proxy', w: 920, body: sheetHTML(0, false) });
+  $('#final').classList.add('hidden');
+}
+async function runSheet(ctx) {
+  say('Five types, five jobs. Here they are side by side.');
+  await Net.beat(ctx);
+  for (let i = 1; i <= SHEET.length; i++) {
+    Net.set('board', { body: sheetHTML(i, false) });
+    say('<b>' + SHEET[i - 1][0] + '</b> is ' + SHEET[i - 1][1] + '. Use it for ' + SHEET[i - 1][2] + '.');
+    await Net.beat(ctx, 2000);
+  }
+  Net.set('board', { body: sheetHTML(SHEET.length, true) });
+  say('<b>The rule:</b> pick the type by how you will read the data.', 'win');
+}
+
+
+// ---------- "why Redis": the same sale, without and then with Redis ----------
+const USERS = ['Aman', 'Zoya', 'Om', 'Riya', 'Dev', 'Isha'];
+const PHONE = '{"name":"Phone","price":999}';
+const big = v => `<div class="big">${v}</div>`;
+const sqlLine = t => `<div class="tl">${esc(t)}</div>`;
+const note = t => `<div class="tl cm">${esc(t)}</div>`;
+const cmdLine = (c, r) => `<div class="tl"><span class="pr">127.0.0.1:6379&gt;</span> ${esc(c)}<div class="rp">${esc(r)}</div></div>`;
+function setPanel(t1, left, t2, right) {
+  $('#t1').textContent = t1; $('#t2').textContent = t2;
+  if (left !== null) $('#term').innerHTML = left;
+  if (right !== null) $('#endView').innerHTML = right;
+}
+function setUser(i, text, cls) { Net.set('u' + i, { body: `<div class="wt ${cls || ''}">${text}</div>` }); }
+const wait = (ctx, ms) => Net.wait(ctx, ms);
+const dbBody = t => `<div class="rep">${t}</div>`;
+
+function whyLayout(redis, redisBody, dbText, c1, c2) {
+  USERS.forEach((u, i) => Net.node('u' + i, { x: 90, y: 58 + i * 64, label: u, kind: 'client small', w: 100, body: '<div class="wt">—</div>' }));
+  Net.node('app', { x: 330, y: 220, label: '⚙️ App server', kind: 'proxy', w: 150 });
+  USERS.forEach((u, i) => Net.link('u' + i, 'app'));
+  if (redis) { Net.node('rd', { x: 625, y: 100, label: '⚡ Redis', sub: 'keys in RAM · about 1 ms', kind: 'lb', w: 250, body: redisBody }); Net.link('app', 'rd'); }
+  Net.node('db', { x: 625, y: 335, label: '🗄️ Database', sub: 'works from disk · 200 ms per query', kind: 'db', w: 250, body: dbBody(dbText) });
+  Net.link('app', 'db');
+  Net.node('c1', { x: 900, y: 150, label: c1, kind: 'count', w: 150, body: big(0) });
+  Net.node('c2', { x: 900, y: 320, label: c2, kind: 'count', w: 150, body: big('–') });
+}
+const setC = (id, v, cls) => Net.set(id, { body: big(v), kind: 'count ' + (cls || '') });
+const sendAll = (from, to, label, cls) => Promise.all(USERS.map((u, i) => Net.send(from(i), to(i), { label, cls, dur: 800 })));
+
+function setupA() {
+  whyLayout(false, '', 'product 5: Phone · 999', 'Database queries', 'Slowest wait');
+  setPanel('SQL the app runs for every single visitor',
+    sqlLine("SELECT name, price FROM products WHERE id = 5;") + note('-- the same query, the same answer, 6 times'),
+    'What the 6 visitors felt',
+    card('result', 'summary', '<div class="big">6 queries</div><div class="cap">the last visitor waited 1.2 seconds. Nobody had anything new to learn.</div>'));
+  $('#final').classList.remove('hidden');
+}
+async function runA(ctx) {
+  say('It is sale day. <b>6 people open the same product page</b> at the same moment. There is no Redis yet: just the app and the database.');
+  await Net.beat(ctx);
+  say('Every visit goes <b>user → app → database</b>.');
+  await sendAll(i => 'u' + i, () => 'app', 'open page');
+  Net.check(ctx);
+  USERS.forEach((u, i) => setUser(i, 'waiting…'));
+  await sendAll(() => 'app', () => 'db', 'SELECT', 'amber');
+  Net.check(ctx);
+  Net.set('db', { body: dbBody('queue: 6 identical queries') });
+  setC('c1', 6, 'hot');
+  await Net.beat(ctx);
+  say('The database reads from <b>disk</b>, about 200 ms each. All 6 want the <b>same answer</b>, but it answers them one after the other.', 'err');
+  await Net.beat(ctx);
+  for (let k = 0; k < 6; k++) {
+    await wait(ctx, 400);
+    await Net.send('db', 'app', { label: 'row', cls: 'ok', dur: 500 });
+    await Net.send('app', 'u' + k, { label: 'page', cls: 'ok', dur: 600 });
+    Net.check(ctx);
+    const t = ((k + 1) * 0.2).toFixed(1) + ' s';
+    setUser(k, 'got it after ' + t, k > 2 ? 'bad' : 'ok');
+    Net.set('db', { body: dbBody(k < 5 ? 'queue: ' + (5 - k) + ' left' : 'idle') });
+    setC('c2', t, k > 2 ? 'hot' : '');
+  }
+  await Net.beat(ctx);
+  say('<b>The problem:</b> the same work was done 6 times, and the last person waited 1.2 s. With 6,000 visitors the page times out and the database goes down. More app servers would not help: they all ask the same database.', 'err');
+}
+
+const CACHED = card('product:5', 'string', `<pre>${esc(PHONE)}</pre>`, true);
+function setupB() {
+  whyLayout(true, '<div class="none">empty</div>', 'product 5: Phone · 999', 'Database queries', 'Slowest wait');
+  setPanel('What happens, in order',
+    note('-- visitor 1: ask Redis first') + cmdLine('GET product:5', '(nil)')
+    + note('-- nothing there, so ask the database once') + sqlLine('SELECT name, price FROM products WHERE id = 5;')
+    + note('-- keep a copy in Redis for 60 seconds') + cmdLine("SET product:5 '" + PHONE + "' EX 60", 'OK')
+    + note('-- visitors 2 to 6') + cmdLine('GET product:5', '"' + PHONE.replace(/"/g, '\\"') + '"'),
+    'What Redis holds at the end', card('product:5', 'string', `<pre>${esc(PHONE)}</pre><div class="cap">deletes itself after 60 seconds</div>`));
+  $('#final').classList.remove('hidden');
+}
+async function runB(ctx) {
+  say('Same sale, same 6 people. This time a <b>Redis</b> server sits next to the app. The app will <b>look in Redis first</b>.');
+  await Net.beat(ctx);
+  say('<b>Visitor 1</b> opens the page. The app asks Redis: <b>GET product:5</b>.');
+  await Net.send('u0', 'app', { label: 'open page', dur: 800 });
+  setUser(0, 'waiting…');
+  await Net.send('app', 'rd', { label: 'GET', cls: 'teal', dur: 800 });
+  Net.check(ctx);
+  await Net.send('rd', 'app', { label: '(nil)', cls: 'muted', dur: 700 });
+  say('Redis has <b>nothing</b> yet. That is a <b>miss</b>. So the app asks the database, this one time.');
+  await Net.send('app', 'db', { label: 'SELECT', cls: 'amber', dur: 900 });
+  setC('c1', 1);
+  Net.set('db', { body: dbBody('working… 200 ms') });
+  await wait(ctx, 1200);
+  await Net.send('db', 'app', { label: 'row', cls: 'ok', dur: 700 });
+  Net.set('db', { body: dbBody('idle') });
+  await Net.beat(ctx);
+  say('Before answering, the app <b>keeps a copy in Redis</b>: <b>SET product:5 … EX 60</b>. (EX 60 means: forget it after 60 seconds.)');
+  await Net.send('app', 'rd', { label: 'SET', cls: 'teal', dur: 800 });
+  Net.set('rd', { body: CACHED, badge: '60 s' });
+  Net.flash('rd', 'ok');
+  await Net.send('app', 'u0', { label: 'page', cls: 'ok', dur: 700 });
+  setUser(0, 'got it after 0.2 s', 'ok');
+  setC('c2', '0.2 s');
+  await Net.beat(ctx);
+  say('<b>Visitors 2 to 6</b> arrive. The app asks Redis, and this time Redis <b>has it</b>: a <b>hit</b>. The database is not touched.');
+  const rest = [1, 2, 3, 4, 5];
+  await Promise.all(rest.map(i => Net.send('u' + i, 'app', { label: 'open page', dur: 800 })));
+  rest.forEach(i => setUser(i, 'waiting…'));
+  await Promise.all(rest.map(i => Net.send('app', 'rd', { label: 'GET', cls: 'teal', dur: 700 })));
+  Net.check(ctx);
+  await Promise.all(rest.map(i => Net.send('rd', 'app', { label: 'hit', cls: 'ok', dur: 700 })));
+  await Promise.all(rest.map(i => Net.send('app', 'u' + i, { label: 'page', cls: 'ok', dur: 700 })));
+  Net.check(ctx);
+  rest.forEach(i => setUser(i, 'got it after 0.001 s', 'ok'));
+  setC('c1', 1, 'good');
+  Net.flash('rd', 'ok');
+  await Net.beat(ctx);
+  say('<b>Redis wins here.</b> Database queries: 6 → 1. Five people got the page in about 1 ms from RAM. Keeping answers in a fast place like this is called a <b>cache</b>. Redis can do much more than cache, and that is what the next steps show.', 'win');
+}
+
+function setupC() {
+  whyLayout(true, card('product:5', 'string', `<pre>${esc(PHONE)}</pre>`), 'product 5: Phone · 999', 'Database queries', 'Wrong prices shown');
+  Net.set('rd', { badge: '60 s' });
+  setC('c2', 0);
+  setPanel('How to keep Redis honest',
+    note('-- the price changes in the database') + sqlLine('UPDATE products SET price = 899 WHERE id = 5;')
+    + note('-- fix 1: throw the old copy away') + cmdLine('DEL product:5', '(integer) 1')
+    + note('-- next visitor: miss, ask the database, cache again') + cmdLine('GET product:5', '(nil)')
+    + cmdLine("SET product:5 '" + PHONE.replace('999', '899') + "' EX 60", 'OK')
+    + note('-- fix 2: EX 60 means it deletes itself after 60 s anyway'),
+    'What Redis holds at the end', card('product:5', 'string', `<pre>${esc(PHONE.replace('999', '899'))}</pre><div class="cap">the new price, deletes itself after 60 seconds</div>`));
+  $('#final').classList.remove('hidden');
+}
+async function runC(ctx) {
+  say('Later the same day. <b>Redis already holds a copy</b> of product 5, with the price 999.');
+  await Net.beat(ctx);
+  say('The shop owner <b>drops the price to 899</b> in the database. The database is right. Redis does not know.');
+  Net.set('db', { body: dbBody('product 5: Phone · <b>899</b>') });
+  Net.flash('db', 'ok');
+  await Net.beat(ctx);
+  say('<b>Aman</b> opens the page.');
+  await Net.send('u0', 'app', { label: 'open page', dur: 800 });
+  await Net.send('app', 'rd', { label: 'GET', cls: 'teal', dur: 800 });
+  await Net.send('rd', 'app', { label: '999', cls: 'bad', dur: 700 });
+  await Net.send('app', 'u0', { label: 'page', cls: 'bad', dur: 700 });
+  Net.check(ctx);
+  setUser(0, 'sees 999: OLD price', 'bad');
+  setC('c2', 1, 'hot');
+  say('Redis answered fast, but with the <b>old price</b>. A copy goes <b>stale</b> when the original changes. Redis never looks at the database by itself.', 'err');
+  await Net.beat(ctx, 3000);
+  say('<b>Fix 1:</b> whenever the app changes a price, it also tells Redis to <b>delete the old copy</b>: <b>DEL product:5</b>.');
+  await Net.send('app', 'rd', { label: 'DEL', cls: 'teal', dur: 800 });
+  Net.set('rd', { body: '<div class="none">empty</div>', badge: '' });
+  await Net.beat(ctx);
+  say('<b>Zoya</b> opens the page. Redis has nothing, so the app asks the database and caches the <b>fresh</b> answer again.');
+  await Net.send('u1', 'app', { label: 'open page', dur: 800 });
+  await Net.send('app', 'rd', { label: 'GET', cls: 'teal', dur: 700 });
+  await Net.send('rd', 'app', { label: '(nil)', cls: 'muted', dur: 600 });
+  await Net.send('app', 'db', { label: 'SELECT', cls: 'amber', dur: 800 });
+  setC('c1', 1);
+  await wait(ctx, 800);
+  await Net.send('db', 'app', { label: '899', cls: 'ok', dur: 700 });
+  await Net.send('app', 'rd', { label: 'SET', cls: 'teal', dur: 700 });
+  Net.set('rd', { body: card('product:5', 'string', `<pre>${esc(PHONE.replace('999', '899'))}</pre>`, true), badge: '60 s' });
+  await Net.send('app', 'u1', { label: 'page', cls: 'ok', dur: 700 });
+  setUser(1, 'sees 899: correct', 'ok');
+  await Net.beat(ctx);
+  say('<b>Fix 2, the safety net:</b> every cached key gets a lifetime (<b>EX 60</b>). Even if the app forgets to delete it, the old copy disappears by itself within 60 seconds.', 'win');
+}
+
+// ---------- the question before, the answer after ----------
+const WHYQA = [
+  { q: '6 people ask for exactly the same product. Does the database need to do that work 6 times?',
+    a: ['Every visit ran the <b>same query</b> and got the <b>same answer</b>: 6 identical queries.',
+        'The database works from <b>disk</b> (about 200 ms in our example), and when it is busy the queries queue up.',
+        'The last person waited 1.2 s. With 6,000 visitors the page would time out and the database could go down.',
+        'More app servers do not help: they all ask the same database.'],
+    best: '', not: '' },
+  { q: 'The first visitor has to wait anyway. What should happen so the other 5 do not have to?',
+    a: ['Visitor 1: Redis has nothing (a <b>miss</b>), so the app asks the database once and <b>SETs a copy in Redis</b>.',
+        'Visitors 2 to 6: Redis has it (a <b>hit</b>), served from RAM in about 1 ms. Database queries: <b>6 → 1</b>.',
+        'RAM is far faster than disk. That is the whole trick.',
+        'Keeping answers in a fast place is called a <b>cache</b>. Redis is the most popular one, and it can do much more (steps 1 to 5).'],
+    best: 'data that is read often and changes rarely: product pages, profiles, search results',
+    not: 'the only copy of important data (RAM can be lost). The database stays the source of truth' },
+  { q: 'Redis still holds the old price. How does it ever find out that the price changed?',
+    a: ['It does not. Redis never looks at the database, so it keeps serving the <b>stale</b> copy.',
+        '<b>Fix 1:</b> when the app changes the data, it also runs <b>DEL</b> on the key. The next visitor misses and reads fresh data.',
+        '<b>Fix 2:</b> give every cached key a lifetime with <b>EX</b>. It deletes itself, so a copy can be at most that old.',
+        'Real apps use both: DEL for speed, EX as the safety net.'],
+    best: 'DEL when the data changes, plus EX as a safety net',
+    not: 'caching with no expiry at all' }
+];
+const QA = WHYQA.concat(TYPES.map(T => ({ q: T.q, a: T.answer, best: T.best, not: T.not })).concat([{
+  q: 'A new feature needs Redis. How do you decide which of the five types to use?',
+  a: ['Ask <b>how you will read the data</b>, not how it looks.',
+      'One value, or a counter → <b>String</b>. Several fields of one thing → <b>Hash</b>.',
+      'Newest first, or a queue → <b>List</b>. Unique members to compare → <b>Set</b>. Ranked by a number → <b>Sorted set</b>.',
+      'Every one of them lives in RAM, so every read and write is fast.'],
+  best: '', not: ''
+}]));
+let ansOpen = false;
+function paintAnswer(i, open) {
+  ansOpen = open;
+  const qa = QA[i];
+  $('#ansList').innerHTML = qa.a.map(t => `<li>${t}</li>`).join('')
+    + (qa.best ? `<li class="best"><span>Best for</span>${qa.best}</li>` : '')
+    + (qa.not ? `<li class="not"><span>Not for</span>${qa.not}</li>` : '');
+  $('#ansList').classList.toggle('hidden', !open);
+  $('#bAns').textContent = open ? 'Hide answer' : 'Show answer';
+}
+document.addEventListener('net:step', e => {
+  const i = e.detail.i;
+  if (e.detail.state === 'select') $('#story').innerHTML += `<span class="q"><b>Think first:</b> ${QA[i].q}</span>`;
+  paintAnswer(i, e.detail.state === 'done');
+});
+$('#bAns').onclick = () => { const b = document.querySelector('[data-s].on'); paintAnswer(b ? +b.dataset.s : 0, !ansOpen); };
+
+Net.scenarios([
+  { label: 'A Without Redis', story: '<b>Use case:</b> Sale day. Aman, Zoya, Om, Riya, Dev and Isha all open the same Phone page at the same moment.<span class="ask"><b>What the app asks the database:</b> Show product 5: its name and price.</span>', setup: setupA, run: runA },
+  { label: 'B With Redis', story: '<b>Use case:</b> The same sale and the same 6 people, but now a Redis server sits next to the app.<span class="ask"><b>What the app asks:</b> Look in Redis first. Only if it has nothing, ask the database, and keep the answer in Redis.</span>', setup: setupB, run: runB },
+  { label: 'C Data changes', story: '<b>Use case:</b> The price drops from 999 to 899 while a copy of the old price sits in Redis.<span class="ask"><b>What the app asks:</b> Show the new price, not the old one.</span>', setup: setupC, run: runC }
+].concat(TYPES.map(T => ({
+  label: T.label, story: T.story, setup: () => setupType(T), run: ctx => runType(ctx, T)
+}))).concat([{
+  label: '6 Cheat sheet',
+  story: '<b>Use case:</b> You have learned five types. Next week a new feature arrives.<span class="ask"><b>What you ask yourself:</b> Which type fits this job?</span>',
+  setup: setupSheet, run: runSheet
+}]), 'Start with <b>A, B, C</b> to see why Redis exists. Then <b>1 to 5</b> show what it can store.');
+</script>
+</body>
+</html>
